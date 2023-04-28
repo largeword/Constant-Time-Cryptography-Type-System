@@ -25,6 +25,7 @@ data Type
   | TVar TypeVar
 
 newtype TypeVar = TypeVar Int
+                  deriving (Eq, Ord)
 
 instance Show TypeScheme where
   showsPrec _ (Forall var scheme) = showString "forall " . showsPrec 0 var . showString ": " . showsPrec 0 scheme

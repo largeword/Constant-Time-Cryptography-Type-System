@@ -22,7 +22,6 @@ description:         Please see the README on GitHub at <https://github.com/gith
 dependencies:
 - base >= 4.7 && < 5
 - parsec
-- containers
 
 ghc-options:
 - -Wall
@@ -37,6 +36,9 @@ ghc-options:
 
 library:
   source-dirs: src
+  dependencies:
+    - containers
+    - mtl
 
 executables:
   ctc-exe:

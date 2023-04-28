@@ -4,6 +4,7 @@ module Analysis
 
 import AST
 import Type
+import TypeInference
 
 analyse :: Expr -> TypeScheme
-analyse = undefined
+analyse = infer -- TODO: other analysis and transformations
