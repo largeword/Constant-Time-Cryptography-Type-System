@@ -25,5 +25,7 @@ compileFile file = do
       print ast
       putStrLn ""
       putStrLn "Analysis output:"
-      let tp = analyse ast
-      print tp
+      let res = analyse ast
+      case res of
+        Left err2 -> putStrLn ("Error: " ++ err2)
+        Right tp -> print tp

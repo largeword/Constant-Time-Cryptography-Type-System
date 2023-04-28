@@ -7,6 +7,7 @@ import Type
 
 import Data.Map (Map, empty)
 import Control.Monad.State
+import Control.Monad.Except
 
 type TypeEnvironment = Map Id TypeScheme
 
@@ -18,13 +19,19 @@ substitute = undefined -- TODO: fill. implement for Nat, Bool, Fun and Var for n
 substituteEnv :: Substitution -> TypeEnvironment -> TypeEnvironment
 substituteEnv = undefined -- TODO: fill
 
-infixr 9 .
-(.) :: Substitution -> Substitution -> Substitution
-(.) = undefined -- TODO: fill, substitution composition
+infixr 9 .+
+(.+) :: Substitution -> Substitution -> Substitution
+(.+) = undefined -- TODO: fill, substitution composition
 
 newtype InferenceContext = InferenceContext { currentTypeVar :: Int }
 
-type InferenceState a = State InferenceContext a
+type InferenceState = ExceptT String (State InferenceContext)
+
+runInference :: InferenceState a -> InferenceContext -> (Either String a, InferenceContext)
+runInference is = runState (runExceptT is)
+
+evalInference :: InferenceState a -> InferenceContext -> Either String a
+evalInference is ctx = fst (runInference is ctx)
 
 newContext :: InferenceContext
 newContext = InferenceContext {currentTypeVar = 0}
@@ -55,6 +62,6 @@ wAlg = undefined -- TODO: fill
 toTypeScheme :: Type -> TypeScheme
 toTypeScheme t = Type $ LabelledType t L -- TODO: use proper label analysis instead of this?
 
-infer :: Expr -> TypeScheme
-infer e = toTypeScheme $ substitute sub ty
-          where (ty, sub) = evalState (wAlg empty e) newContext
+infer :: Expr -> Either String TypeScheme
+infer e = fmap (toTypeScheme . fst) result
+          where result = evalInference (wAlg empty e) newContext
