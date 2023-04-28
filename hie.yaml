@@ -1,0 +1,13 @@
+cradle:
+  stack:
+    - path: "./src"
+      component: "ctc:lib"
+
+    - path: "./app/Main.hs"
+      component: "ctc:exe:ctc-exe"
+
+    - path: "./app/Paths_ctc.hs"
+      component: "ctc:exe:ctc-exe"
+
+    - path: "./test"
+      component: "ctc:test:ctc-test"
