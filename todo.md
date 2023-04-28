@@ -6,8 +6,9 @@ TODO:
 
   - substitutions
     func
-    - Map TypeVar Type
-    - function to map TypeEnv -> TypeEnv
+    - Subs = Map TypeVar Type
+    - func : Subs -> Type -> Type
+    - func : Subs -> TypeEnv -> TypeEnv
 
         TypeEnv -> TypeEnv
         Type -> Type
@@ -22,6 +23,3 @@ TODO:
     - generalize
     - U
     - W
-
-    M = State Int
-    ... -> M t
