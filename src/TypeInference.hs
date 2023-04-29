@@ -5,7 +5,7 @@ module TypeInference (
 import AST
 import Type
 
-import Data.Map (Map, empty)
+import Data.Map (Map, empty, lookup, fromList, toList, union)
 import Control.Monad.State
 import Control.Monad.Except
 
@@ -13,15 +13,43 @@ type TypeEnvironment = Map Id TypeScheme
 
 type Substitution = Map TypeVar Type
 
+-- TODO: fill. implement for Nat, Bool, Fun and Var for now
 substitute :: Substitution -> Type -> Type
-substitute = undefined -- TODO: fill. implement for Nat, Bool, Fun and Var for now
+substitute substMap (TVar v) = case Data.Map.lookup v substMap of
+                                 Just t -> t
+                                 Nothing -> TVar v
+substitute substMap (TFun lt1 lt2) = TFun (substituteLT substMap lt1) (substituteLT substMap lt2)
+substitute substMap t = t
 
+-- substitute labelled type
+substituteLT :: Substitution -> LabelledType -> LabelledType
+substituteLT substMap (LabelledType t l) = LabelledType (substitute substMap t) l
+
+-- substitute type stored in the env
 substituteEnv :: Substitution -> TypeEnvironment -> TypeEnvironment
-substituteEnv = undefined -- TODO: fill
+substituteEnv substMap typeEnv = fromList (substitueTypeList substMap (toList typeEnv))
+
+-- substitute type stored in a list
+substitueTypeList :: Substitution -> [(Id, TypeScheme)] -> [(Id, TypeScheme)]
+substitueTypeList substMap (t:ts) = case t of
+  (id, ts') -> [(id, substitueTS substMap ts')] ++ (substitueTypeList substMap ts)
+
+-- substitute type in TypeScheme
+substitueTS :: Substitution -> TypeScheme -> TypeScheme
+substitueTS substMap (Forall v ts) = Forall v (substitueTS substMap ts)
+substitueTS substMap (Type lt) = Type (substituteLT substMap lt)
 
 infixr 9 .+
+-- TODO: fill, substitution composition
+-- substMapNew should be obtained after substMapOld
 (.+) :: Substitution -> Substitution -> Substitution
-(.+) = undefined -- TODO: fill, substitution composition
+(.+) substMapNew substMapOld = union substMapNew (fromList (updateOldSubstList (toList substMapOld) substMapNew))
+
+-- update the old Substitution in form of list with new Substitution
+updateOldSubstList :: [(TypeVar, Type)] -> Substitution -> [(TypeVar, Type)]
+updateOldSubstList (s:ss) substMapNew = case s of
+  (v, TVar v') -> [(v, substitute substMapNew (TVar v'))] ++ updateOldSubstList ss substMapNew
+  (v, TFun lt1 lt2) -> [(v, substitute substMapNew (TFun lt1 lt2))] ++ updateOldSubstList ss substMapNew
 
 newtype InferenceContext = InferenceContext { currentTypeVar :: Int }
 
