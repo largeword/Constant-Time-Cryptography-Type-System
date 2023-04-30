@@ -6,9 +6,11 @@ import AST
 import Type
 
 import Data.Map as Map (Map, empty, lookup, union, insert, singleton)
+import Data.Set as Set (Set, empty, insert, member)
 import Control.Monad.State
 import Control.Monad.Except
 import Control.Monad.Trans.Except
+import Control.Applicative ((<|>))
 
 type TypeEnvironment = Map Id TypeScheme
 
@@ -16,7 +18,7 @@ type TypeEnvironment = Map Id TypeScheme
 
 addTo :: TypeEnvironment -> [(Id, TypeScheme)] -> TypeEnvironment
 addTo = foldr update
-        where update (id, ty) = insert id ty
+        where update (id, ty) = Map.insert id ty
 
 getType :: TypeEnvironment -> Id -> Either String TypeScheme
 getType env id = case Map.lookup id env of
@@ -78,13 +80,51 @@ fresh = varType <$> freshVar
 -- generalize function of W Algorithm
 generalize :: TypeEnvironment -> LabelledType -> InferenceState TypeScheme
 generalize env t = do
-                      a <- freshVar                    -- TODO: is this enough? need to check a is not in ftv(env) ?
+                      let existing = findVar (ftv env) t
+                      a <- maybe freshVar return existing -- create new var if there's no existing
                       return (Forall a (Type t))
+
+ftv :: TypeEnvironment -> Set TypeVar
+ftv = foldr collect Set.empty
+      where collect (Forall a ts) s = collect ts (Set.insert a s)
+            collect (Type _) s = s
+
+findVar :: Set TypeVar -> LabelledType -> Maybe TypeVar
+findVar ftvs (LabelledType t _) = findVarT ftvs t
+
+findVarT :: Set TypeVar -> Type -> Maybe TypeVar
+findVarT _ TNat  = Nothing
+findVarT _ TBool = Nothing
+findVarT ftvs (TVar v)      = if v `member` ftvs then Nothing else Just v
+findVarT ftvs (TFun t1 t2)  = findVar ftvs t1 <|> findVar ftvs t2
+findVarT ftvs (TArray t)    = findVar ftvs t
+findVarT ftvs (TPair t1 t2) = findVar ftvs t1 <|> findVar ftvs t2
+findVarT ftvs (TList t)     = findVar ftvs t
 
 -- instantiate function of W Algorithm
 instantiate :: TypeScheme -> InferenceState LabelledType
-instantiate (Forall _ ts) = instantiate ts
-instantiate (Type l)      = return l
+instantiate ts = instantiateReplace ts Map.empty
+
+instantiateReplace :: TypeScheme -> Map TypeVar TypeVar -> InferenceState LabelledType
+instantiateReplace (Forall va ts) rep = do
+                                          vr <- freshVar
+                                          instantiateReplace ts (Map.insert va vr rep)
+instantiateReplace (Type l) rep       = return $ if null rep then l else replaceVar rep l
+
+replaceVar :: Map TypeVar TypeVar -> LabelledType -> LabelledType
+replaceVar rep (LabelledType t l) = LabelledType (replaceVarT rep t) l
+
+replaceVarT :: Map TypeVar TypeVar -> Type -> Type
+replaceVarT _ TNat  = TNat
+replaceVarT _ TBool = TBool
+replaceVarT rep (TFun t1 t2)  = TFun (replaceVar rep t1) (replaceVar rep t2)
+replaceVarT rep (TArray t)    = TArray (replaceVar rep t)
+replaceVarT rep (TPair t1 t2) = TPair (replaceVar rep t1) (replaceVar rep t2)
+replaceVarT rep (TList t)     = TList (replaceVar rep t)
+replaceVarT rep (TVar vold)   = let replacement = Map.lookup vold rep in
+                                  case replacement of
+                                    Just vnew -> TVar vnew
+                                    Nothing   -> TVar vold
 
 -- unify (U) function of W Algorithm
 unify :: LabelledType -> LabelledType -> InferenceState Substitution
@@ -92,34 +132,32 @@ unify (LabelledType t1 L) (LabelledType t2 L) = unifyType t1 t2 L -- TODO: handl
 
 -- TODO: fill. implement for Nat, Bool, Fun and Var for now
 unifyType :: Type -> Type -> Label -> InferenceState Substitution
-unifyType TNat       TNat         _ = return empty
-unifyType TBool      TBool        _ = return empty
+unifyType TNat       TNat         _ = return Map.empty
+unifyType TBool      TBool        _ = return Map.empty
 unifyType (TFun x y) (TFun x' y') _ = do
                                       s1 <- unify x x'
                                       let sub = substitute s1
                                       s2 <- unify (sub y) (sub y')
                                       return (s2 .+ s1)
 
-unifyType (TVar a)   t            l = if a `inType` t then throwE $ "Infinite type " ++ show t
-                                      else return $ Map.singleton a (LabelledType t l)
-
-unifyType t          (TVar a)     l = if a `inType` t then throwE $ "Infinite type " ++ show t
-                                      else return $ Map.singleton a (LabelledType t l)
+-- it should be okay to not check whether a is in ftv(t) since there should be no free variable in t
+unifyType (TVar a)   t            l = return $ Map.singleton a (LabelledType t l)
+unifyType t          (TVar a)     l = return $ Map.singleton a (LabelledType t l)
 
 unifyType t1         t2           _ = throwE $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
 
 -- W function of W Algorithm
 wAlg :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution)
-wAlg _   (Nat _)  = return (lowConf TNat, empty)
-wAlg _   (Bool _) = return (lowConf TBool, empty)
+wAlg _   (Nat _)  = return (lowConf TNat, Map.empty)
+wAlg _   (Bool _) = return (lowConf TBool, Map.empty)
 wAlg env (Var id) = do
                       ts <- except $ getType env id
                       ty <- instantiate ts
-                      return (ty, empty)
+                      return (ty, Map.empty)
 
 wAlg env (Fn x expr) = do
                           a <- fresh
-                          (ty, s) <- wAlg (insert x (Type a) env) expr
+                          (ty, s) <- wAlg (Map.insert x (Type a) env) expr
                           let tf = fnType (substitute s a) ty
                           return (tf, s)
 
@@ -138,6 +176,21 @@ wAlg env (Fun f x expr) = do
 
                             return (tfun, s)
 
+wAlg env (App e1 e2)    = do
+                            (t1, s1) <- wAlg env e1
+                            (t2, s2) <- wAlg (substituteEnv s1 env) e2
+                            a <- fresh
+                            let tfun = fnType t2 a
+                            s3 <- unify (substitute s2 t1) tfun
+                            return (substitute s3 a, s3 .+ s2 .+ s1)
+
+wAlg env (Let x e1 e2)  = do
+                            (t1, s1) <- wAlg env e1
+                            let env' = substituteEnv s1 env
+                            tx <- generalize env' t1
+                            (t2, s2) <- wAlg (Map.insert x tx env') e2
+                            return (t2, s2 .+ s1)
+
 wAlg env _        = undefined -- TODO: fill
 
 -- W Algorithm helper functions
@@ -146,24 +199,12 @@ lowConf :: Type -> LabelledType
 lowConf t = LabelledType t L
 
 varType :: TypeVar -> LabelledType
-varType v = lowConf (TVar v)
+varType v = lowConf (TVar v) -- TODO: use annotationvar instead of L?
 
 fnType :: LabelledType -> LabelledType -> LabelledType
-fnType x y = lowConf (TFun x y)
-
-inType :: TypeVar -> Type -> Bool
-inType (TypeVar i1) (TVar (TypeVar i2)) = i1 == i2
-inType _ TNat = False
-inType _ TBool = False
-inType v (TFun t1 t2) = inTypeL v t1 || inTypeL v t2
-inType v (TArray t) = inTypeL v t
-inType v (TPair t1 t2) = inTypeL v t1 || inTypeL v t2
-inType v (TList t) = inTypeL v t
-
-inTypeL :: TypeVar -> LabelledType -> Bool
-inTypeL v (LabelledType t _) = inType v t
+fnType x y = lowConf (TFun x y) -- TODO: use annotationvar instead of L?
 
 -- |infer runs type inference analysis for an expression
 infer :: Expr -> Either String TypeScheme
 infer e = fmap (Type . fst) result
-          where result = evalInference (wAlg empty e) newContext
+          where result = evalInference (wAlg Map.empty e) newContext
