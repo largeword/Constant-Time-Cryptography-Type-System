@@ -86,10 +86,7 @@ fresh = varType <$> freshVar
 generalize :: TypeEnvironment -> LabelledType -> InferenceState TypeScheme
 generalize env t = do
                       let existingVars = findVars (ftv env) Set.empty t
-                      vars <- createIfEmpty (Set.toList existingVars)
-                      return $ foldr Forall (Type t) vars
-                   where createIfEmpty [] = do x <- freshVar; return [x]
-                         createIfEmpty l  = return l
+                      return $ foldr Forall (Type t) (Set.toList existingVars)
 
 ftv :: TypeEnvironment -> Set TypeVar
 ftv = foldr collect Set.empty
