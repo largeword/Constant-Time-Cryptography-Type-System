@@ -6,7 +6,7 @@ import AST
 import Type
 
 import Data.Map as Map (Map, empty, lookup, union, insert, singleton)
-import Data.Set as Set (Set, empty, insert, member)
+import Data.Set as Set (Set, empty, insert, member, toList)
 import Control.Monad.State
 import Control.Monad.Except
 import Control.Monad.Trans.Except
@@ -32,11 +32,16 @@ substitute :: Substitution -> LabelledType -> LabelledType
 substitute substMap (LabelledType t l) = substituteType substMap t l -- TODO: handle label?
 
 substituteType :: Substitution -> Type -> Label -> LabelledType
-substituteType substMap (TVar v)       label = case Map.lookup v substMap of
-                                                  Just t -> t
-                                                  Nothing -> LabelledType (TVar v) label -- TODO: should this be an error?
-substituteType substMap (TFun lt1 lt2) label = LabelledType (TFun (substitute substMap lt1) (substitute substMap lt2)) label
-substituteType substMap t              label = LabelledType t label -- TODO: TArray, TPair, TList
+substituteType s (TVar v) lbl = case Map.lookup v s of
+                                  Just t -> t
+                                  Nothing -> LabelledType (TVar v) lbl
+
+substituteType s (TFun lt1 lt2)  lbl = LabelledType (TFun (substitute s lt1) (substitute s lt2)) lbl
+substituteType s (TPair lt1 lt2) lbl = LabelledType (TPair (substitute s lt1) (substitute s lt2)) lbl
+substituteType s (TArray lt) lbl = LabelledType (TArray (substitute s lt)) lbl
+substituteType s (TList lt)  lbl = LabelledType (TList (substitute s lt)) lbl
+
+substituteType _ t lbl = LabelledType t lbl -- Nat and Bool
 
 -- substitute type stored in the env
 substituteEnv :: Substitution -> TypeEnvironment -> TypeEnvironment
@@ -80,26 +85,28 @@ fresh = varType <$> freshVar
 -- generalize function of W Algorithm
 generalize :: TypeEnvironment -> LabelledType -> InferenceState TypeScheme
 generalize env t = do
-                      let existing = findVar (ftv env) t
-                      a <- maybe freshVar return existing -- create new var if there's no existing
-                      return (Forall a (Type t))
+                      let existingVars = findVars (ftv env) Set.empty t
+                      vars <- createIfEmpty (Set.toList existingVars)
+                      return $ foldr Forall (Type t) vars
+                   where createIfEmpty [] = do x <- freshVar; return [x]
+                         createIfEmpty l  = return l
 
 ftv :: TypeEnvironment -> Set TypeVar
 ftv = foldr collect Set.empty
       where collect (Forall a ts) s = collect ts (Set.insert a s)
             collect (Type _) s = s
 
-findVar :: Set TypeVar -> LabelledType -> Maybe TypeVar
-findVar ftvs (LabelledType t _) = findVarT ftvs t
+findVars :: Set TypeVar -> Set TypeVar -> LabelledType -> Set TypeVar
+findVars ftvs acc (LabelledType t _) = findVarsT ftvs acc t
 
-findVarT :: Set TypeVar -> Type -> Maybe TypeVar
-findVarT _ TNat  = Nothing
-findVarT _ TBool = Nothing
-findVarT ftvs (TVar v)      = if v `member` ftvs then Nothing else Just v
-findVarT ftvs (TFun t1 t2)  = findVar ftvs t1 <|> findVar ftvs t2
-findVarT ftvs (TArray t)    = findVar ftvs t
-findVarT ftvs (TPair t1 t2) = findVar ftvs t1 <|> findVar ftvs t2
-findVarT ftvs (TList t)     = findVar ftvs t
+findVarsT :: Set TypeVar -> Set TypeVar -> Type -> Set TypeVar
+findVarsT _ acc TNat  = acc
+findVarsT _ acc TBool = acc
+findVarsT ftvs acc (TVar v)      = if v `member` ftvs then acc else Set.insert v acc
+findVarsT ftvs acc (TFun t1 t2)  = let acc' = findVars ftvs acc t1 in findVars ftvs acc' t2
+findVarsT ftvs acc (TArray t)    = findVars ftvs acc t
+findVarsT ftvs acc (TPair t1 t2) = let acc' = findVars ftvs acc t1 in findVars ftvs acc' t2
+findVarsT ftvs acc (TList t)     = findVars ftvs acc t
 
 -- instantiate function of W Algorithm
 instantiate :: TypeScheme -> InferenceState LabelledType
@@ -191,6 +198,12 @@ wAlg env (Let x e1 e2)  = do
                             (t2, s2) <- wAlg (Map.insert x tx env') e2
                             return (t2, s2 .+ s1)
 
+wAlg env (Pair e1 e2)   = do
+                            (t1, s1) <- wAlg env e1
+                            (t2, s2) <- wAlg (substituteEnv s1 env) e2
+                            let tp = pairType (substitute s2 t1) t2
+                            return (tp, s2 .+ s1)
+
 wAlg env _        = undefined -- TODO: fill
 
 -- W Algorithm helper functions
@@ -203,6 +216,9 @@ varType v = lowConf (TVar v) -- TODO: use annotationvar instead of L?
 
 fnType :: LabelledType -> LabelledType -> LabelledType
 fnType x y = lowConf (TFun x y) -- TODO: use annotationvar instead of L?
+
+pairType :: LabelledType -> LabelledType -> LabelledType
+pairType x y = lowConf (TPair x y) -- TODO: use annotationvar instead of L?
 
 -- |infer runs type inference analysis for an expression
 infer :: Expr -> Either String TypeScheme
