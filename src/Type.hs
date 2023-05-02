@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Type (
   TypeScheme(..),
@@ -15,6 +16,10 @@ data LabelledType = LabelledType Type Label
 data Label = H | L | LabelVar AnnotationVar
 newtype AnnotationVar = AnnotationVar Int
 
+deriving instance Eq AnnotationVar
+deriving instance Eq Label
+deriving instance Eq LabelledType
+
 data Type
   = TNat
   | TBool
@@ -23,6 +28,8 @@ data Type
   | TPair LabelledType LabelledType
   | TList LabelledType
   | TVar TypeVar
+
+deriving instance Eq Type
 
 newtype TypeVar = TypeVar Int
                   deriving (Eq, Ord)

@@ -80,7 +80,7 @@ freshVar = do
           return (TypeVar current)
 
 fresh :: InferenceState LabelledType
-fresh = varType <$> freshVar
+fresh = (\v -> varType v L) <$> freshVar  -- TODO: need to decide the type label
 
 -- generalize function of W Algorithm
 generalize :: TypeEnvironment -> LabelledType -> InferenceState TypeScheme
@@ -152,8 +152,8 @@ unifyType t1         t2           _ = throwE $ "Mismatched types " ++ show t1 ++
 
 -- W function of W Algorithm
 wAlg :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution)
-wAlg _   (Nat _)  = return (lowConf TNat, Map.empty)
-wAlg _   (Bool _) = return (lowConf TBool, Map.empty)
+wAlg _   (Nat _)  = return (lowConf TNat L, Map.empty)  -- TODO: need to decide the type label
+wAlg _   (Bool _) = return (lowConf TBool L, Map.empty)  -- TODO: need to decide the type label
 wAlg env (Var id) = do
                       ts <- except $ getType env id
                       ty <- instantiate ts
@@ -205,17 +205,25 @@ wAlg env _        = undefined -- TODO: fill
 
 -- W Algorithm helper functions
 
-lowConf :: Type -> LabelledType
-lowConf t = LabelledType t L
+lowConf :: Type -> Label -> LabelledType
+lowConf t lbl = LabelledType t lbl
 
-varType :: TypeVar -> LabelledType
-varType v = lowConf (TVar v) -- TODO: use annotationvar instead of L?
+varType :: TypeVar -> Label -> LabelledType
+varType v lbl = lowConf (TVar v) lbl -- TODO: use annotationvar instead of L?
 
 fnType :: LabelledType -> LabelledType -> LabelledType
-fnType x y = lowConf (TFun x y) -- TODO: use annotationvar instead of L?
+fnType (LabelledType x xlbl) (LabelledType y ylbl) = lowConf (TFun x' y') lbl
+                                                     where x' = LabelledType x xlbl
+                                                           y' = LabelledType y ylbl
+                                                           -- TODO: need more accurate way to decide the new confidential level
+                                                           lbl = if xlbl == H then H else ylbl
 
 pairType :: LabelledType -> LabelledType -> LabelledType
-pairType x y = lowConf (TPair x y) -- TODO: use annotationvar instead of L?
+pairType (LabelledType x xlbl) (LabelledType y ylbl) = lowConf (TPair x' y') lbl
+                                                     where x' = LabelledType x xlbl
+                                                           y' = LabelledType y ylbl
+                                                           -- TODO: need more accurate way to decide the new confidential level
+                                                           lbl = if xlbl == H then H else ylbl
 
 -- |infer runs type inference analysis for an expression
 infer :: Expr -> Either String TypeScheme
