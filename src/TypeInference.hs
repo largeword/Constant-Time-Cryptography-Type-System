@@ -159,6 +159,14 @@ wAlg env (Var id) = do
                       ty <- instantiate ts
                       return (ty, Map.empty)
 
+
+wAlg env (Let x e1 e2)  = do
+                            (t1, s1) <- wAlg env e1
+                            let env' = substituteEnv s1 env
+                            tx <- generalize env' t1
+                            (t2, s2) <- wAlg (Map.insert x tx env') e2
+                            return (t2, s2 .+ s1)
+
 wAlg env (Fn x expr) = do
                           a <- fresh
                           (ty, s) <- wAlg (Map.insert x (Type a) env) expr
@@ -188,18 +196,36 @@ wAlg env (App e1 e2)    = do
                             s3 <- unify (substitute s2 t1) tfun
                             return (substitute s3 a, s3 .+ s2 .+ s1)
 
-wAlg env (Let x e1 e2)  = do
-                            (t1, s1) <- wAlg env e1
-                            let env' = substituteEnv s1 env
-                            tx <- generalize env' t1
-                            (t2, s2) <- wAlg (Map.insert x tx env') e2
-                            return (t2, s2 .+ s1)
+wAlg env (IfThenElse cd e1 e2) = undefine
 
+wAlg env (Operator op e1 e2) = undefine
+
+wAlg env (TypeAnnotation e lt) = undifine
+
+wAlg env (Sequence e1 e2) = undifine
+
+-- Arrays
+wAlg env (Array e1 e2) = undefine
+
+wAlg env (ArrayRead e1 e2) = undefine
+
+wAlg env (ArrayWrite e1 e2 e3) = undefine
+
+-- Pairs
 wAlg env (Pair e1 e2)   = do
                             (t1, s1) <- wAlg env e1
                             (t2, s2) <- wAlg (substituteEnv s1 env) e2
                             let tp = pairType (substitute s2 t1) t2
                             return (tp, s2 .+ s1)
+                            
+wAlg env (CasePair e1 x1 e2 x2)   = undefine
+
+-- Lists
+wAlg env Nil   = undefine
+
+wAlg env (Cons x xs)   = undefine
+
+wAlg env (CaseList e1 e2 x1 x2 e3)   = undefine
 
 wAlg env _        = undefined -- TODO: fill
 
