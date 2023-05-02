@@ -1,2 +1,7 @@
+import Test.Tasty
+import InferenceTest (testInference)
+
 main :: IO ()
-main = putStrLn "Test suite not yet implemented"
+main = defaultMain $ testGroup "CTC Test" [
+    testInference
+  ]

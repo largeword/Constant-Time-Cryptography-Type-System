@@ -52,23 +52,30 @@ executable ctc-exe
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
+    , containers
     , ctc
+    , mtl
     , parsec
+    , transformers
   default-language: Haskell2010
 
 test-suite ctc-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      InferenceTest
       Paths_ctc
   hs-source-dirs:
       test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
+    , containers
     , ctc
+    , mtl
     , parsec
     , tasty
     , tasty-hunit
     , tasty-quickcheck
+    , transformers
   default-language: Haskell2010
