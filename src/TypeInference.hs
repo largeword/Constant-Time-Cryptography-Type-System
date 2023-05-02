@@ -202,13 +202,20 @@ wAlg env (IfThenElse e1 e2 e3) = do
                                   let s1Env = substituteEnv s1 env
                                   (t2, s2) <- wAlg s1Env e2
                                   let s2Env = substituteEnv s2 s1Env
-                                  (t3, s3) <- wAlg s2Env e2
+                                  (t3, s3) <- wAlg s2Env e3
                                   let s3Env = substituteEnv s3 s2Env
                                   s4 <- unify (substitute s3 (substitute s2 t1)) (LabelledType TBool L)
                                   s5 <- unify (substitute s4 (substitute s3 t2)) (substitute s4 t3)
                                   return (substitute s5 (substitute s4 t3), s5 .+ s4 .+ s3 .+ s2 .+ s1)
 
-wAlg env (Operator op e1 e2) = undefined
+-- TODO: All operators can be applied to both Nat and Bool
+wAlg env (Operator op e1 e2) = do
+                                 (t1, s1) <- wAlg env e1
+                                 let s1Env = substituteEnv s1 env
+                                 (t2, s2) <- wAlg s1Env e2
+                                 s3 <- unify (substitute s2 t1) (LabelledType TNat L)
+                                 s4 <- unify (substitute s3 t2) (LabelledType TNat L)
+                                 return (LabelledType TNat L, s4 .+ s3 .+ s2 .+ s1)  -- TODO: handling type label
 
 wAlg env (TypeAnnotation e lt) = undefined
 
