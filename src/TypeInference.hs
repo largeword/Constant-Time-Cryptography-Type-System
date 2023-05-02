@@ -132,7 +132,8 @@ replaceVarT rep (TVar vold)   = let replacement = Map.lookup vold rep in
 
 -- unify (U) function of W Algorithm
 unify :: LabelledType -> LabelledType -> InferenceState Substitution
-unify (LabelledType t1 L) (LabelledType t2 L) = unifyType t1 t2 L -- TODO: handle other label and their unification
+unify (LabelledType t1 lbl1) (LabelledType t2 lbl2) = unifyType t1 t2 lbl -- TODO: handle other label and their unification
+                                                    where lbl = if lbl1 == H then H else lbl2
 
 -- TODO: fill. implement for Nat, Bool, Fun and Var for now
 unifyType :: Type -> Type -> Label -> InferenceState Substitution
