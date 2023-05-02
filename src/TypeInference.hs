@@ -196,20 +196,29 @@ wAlg env (App e1 e2)    = do
                             s3 <- unify (substitute s2 t1) tfun
                             return (substitute s3 a, s3 .+ s2 .+ s1)
 
-wAlg env (IfThenElse cd e1 e2) = undefine
+wAlg env (IfThenElse e1 e2 e3) = do
+                                  (t1, s1) <- wAlg env e1
+                                  let s1Env = substituteEnv s1 env
+                                  (t2, s2) <- wAlg s1Env e2
+                                  let s2Env = substituteEnv s2 s1Env
+                                  (t3, s3) <- wAlg s2Env e2
+                                  let s3Env = substituteEnv s3 s2Env
+                                  s4 <- unify (substitute s3 (substitute s2 t1)) (LabelledType TBool L)
+                                  s5 <- unify (substitute s4 (substitute s3 t2)) (substitute s4 t3)
+                                  return (substitute s5 (substitute s4 t3), s5 .+ s4 .+ s3 .+ s2 .+ s1)
 
-wAlg env (Operator op e1 e2) = undefine
+wAlg env (Operator op e1 e2) = undefined
 
-wAlg env (TypeAnnotation e lt) = undifine
+wAlg env (TypeAnnotation e lt) = undefined
 
-wAlg env (Sequence e1 e2) = undifine
+wAlg env (Sequence e1 e2) = undefined
 
 -- Arrays
-wAlg env (Array e1 e2) = undefine
+wAlg env (Array e1 e2) = undefined
 
-wAlg env (ArrayRead e1 e2) = undefine
+wAlg env (ArrayRead e1 e2) = undefined
 
-wAlg env (ArrayWrite e1 e2 e3) = undefine
+wAlg env (ArrayWrite e1 e2 e3) = undefined
 
 -- Pairs
 wAlg env (Pair e1 e2)   = do
@@ -218,14 +227,14 @@ wAlg env (Pair e1 e2)   = do
                             let tp = pairType (substitute s2 t1) t2
                             return (tp, s2 .+ s1)
                             
-wAlg env (CasePair e1 x1 e2 x2)   = undefine
+wAlg env (CasePair e1 x1 e2 x2)   = undefined
 
 -- Lists
-wAlg env Nil   = undefine
+wAlg env Nil   = undefined
 
-wAlg env (Cons x xs)   = undefine
+wAlg env (Cons x xs)   = undefined
 
-wAlg env (CaseList e1 e2 x1 x2 e3)   = undefine
+wAlg env (CaseList e1 e2 x1 x2 e3)   = undefined
 
 wAlg env _        = undefined -- TODO: fill
 
