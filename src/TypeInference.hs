@@ -130,10 +130,18 @@ replaceVarT rep (TVar vold)   = let replacement = Map.lookup vold rep in
                                     Just vnew -> TVar vnew
                                     Nothing   -> TVar vold
 
+-- Intuitively, the new type label should euqal to the highest one
+getNewTypeLabel :: Label -> Label -> Label
+getNewTypeLabel H _ = H
+getNewTypeLabel _ H = H
+getNewTypeLabel (LabelVar (AnnotationVar x)) L = LabelVar (AnnotationVar x)
+getNewTypeLabel L (LabelVar (AnnotationVar y)) = LabelVar (AnnotationVar y)
+getNewTypeLabel (LabelVar (AnnotationVar x)) (LabelVar (AnnotationVar y)) = LabelVar (AnnotationVar (if x > y then x else y))
+
 -- unify (U) function of W Algorithm
 unify :: LabelledType -> LabelledType -> InferenceState Substitution
 unify (LabelledType t1 lbl1) (LabelledType t2 lbl2) = unifyType t1 t2 lbl -- TODO: handle other label and their unification
-                                                    where lbl = if lbl1 == H then H else lbl2
+                                                    where lbl = getNewTypeLabel lbl1 lbl2
 
 -- TODO: fill. implement for Nat, Bool, Fun and Var for now
 unifyType :: Type -> Type -> Label -> InferenceState Substitution
@@ -259,14 +267,14 @@ fnType (LabelledType x xlbl) (LabelledType y ylbl) = lowConf (TFun x' y') lbl
                                                      where x' = LabelledType x xlbl
                                                            y' = LabelledType y ylbl
                                                            -- TODO: need more accurate way to decide the new confidential level
-                                                           lbl = if xlbl == H then H else ylbl
+                                                           lbl = getNewTypeLabel xlbl ylbl
 
 pairType :: LabelledType -> LabelledType -> LabelledType
 pairType (LabelledType x xlbl) (LabelledType y ylbl) = lowConf (TPair x' y') lbl
                                                      where x' = LabelledType x xlbl
                                                            y' = LabelledType y ylbl
                                                            -- TODO: need more accurate way to decide the new confidential level
-                                                           lbl = if xlbl == H then H else ylbl
+                                                           lbl = getNewTypeLabel xlbl ylbl
 
 -- |infer runs type inference analysis for an expression
 infer :: Expr -> Either String TypeScheme
