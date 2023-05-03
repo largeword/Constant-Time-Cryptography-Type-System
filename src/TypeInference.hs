@@ -70,7 +70,7 @@ evalInference :: InferenceState a -> InferenceContext -> Either String a
 evalInference is ctx = fst (runInference is ctx)
 
 newContext :: InferenceContext
-newContext = InferenceContext {currentTypeVar = 0}
+newContext = InferenceContext {currentTypeVar = 0, currentAnnVar = 0}
 
 freshVar :: InferenceState TypeVar
 freshVar = do
