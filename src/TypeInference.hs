@@ -10,7 +10,6 @@ import Data.Set as Set (Set, empty, insert, member, toList)
 import Control.Monad.State
 import Control.Monad.Except
 import Control.Monad.Trans.Except
-import Control.Applicative ((<|>))
 
 type TypeEnvironment = Map Id TypeScheme
 
@@ -151,7 +150,6 @@ unify :: LabelledType -> LabelledType -> InferenceState Substitution
 unify (LabelledType t1 lbl1) (LabelledType t2 lbl2) = unifyType t1 t2 lbl -- TODO: handle other label and their unification
                                                     where lbl = getNewTypeLabel lbl1 lbl2
 
--- TODO: fill. implement for Nat, Bool, Fun and Var for now
 unifyType :: Type -> Type -> Label -> InferenceState Substitution
 unifyType TNat       TNat         _ = return Map.empty
 unifyType TBool      TBool        _ = return Map.empty
@@ -160,6 +158,15 @@ unifyType (TFun x y) (TFun x' y') _ = do
                                       let sub = substitute s1
                                       s2 <- unify (sub y) (sub y')
                                       return (s2 .+ s1)
+
+unifyType (TPair x y) (TPair x' y') _ = do
+                                          s1 <- unify x x'
+                                          let sub = substitute s1
+                                          s2 <- unify (sub y) (sub y')
+                                          return (s2 .+ s1)
+
+unifyType (TList t1)  (TList t2)  _ = unify t1 t2
+unifyType (TArray t1) (TArray t2) _ = unify t1 t2
 
 -- it should be okay to not check whether a is in ftv(t) since there should be no free variable in t
 unifyType (TVar a)   t            l = return $ Map.singleton a (LabelledType t l)
