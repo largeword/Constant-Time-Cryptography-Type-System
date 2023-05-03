@@ -26,6 +26,7 @@ getType env id = case Map.lookup id env of
                    Just t  -> Right t
 
 type Substitution = Map TypeVar LabelledType
+--  Map AnnotationVar Label
 
 -- substitute labelled type
 substitute :: Substitution -> LabelledType -> LabelledType
@@ -59,7 +60,7 @@ infixr 9 .+
 (.+) substMapNew substMapOld = substMapNew `union` fmap update substMapOld
                                where update = substitute substMapNew
 
-newtype InferenceContext = InferenceContext { currentTypeVar :: Int }
+data InferenceContext = InferenceContext { currentTypeVar :: Int, currentAnnVar :: Int }
 
 type InferenceState = ExceptT String (State InferenceContext)
 
@@ -78,6 +79,13 @@ freshVar = do
           let current = currentTypeVar ctx
           put ctx { currentTypeVar = current + 1}
           return (TypeVar current)
+
+freshAnnotationVar :: InferenceState AnnotationVar
+freshAnnotationVar = do
+                       ctx <- get
+                       let current = currentAnnVar ctx
+                       put ctx {currentAnnVar = current + 1}
+                       return (AnnotationVar current)
 
 fresh :: InferenceState LabelledType
 fresh = (\v -> varType v L) <$> freshVar  -- TODO: need to decide the type label
@@ -168,7 +176,6 @@ wAlg env (Var id) = do
                       ty <- instantiate ts
                       return (ty, Map.empty)
 
-
 wAlg env (Let x e1 e2)  = do
                             (t1, s1) <- wAlg env e1
                             let env' = substituteEnv s1 env
@@ -216,7 +223,7 @@ wAlg env (IfThenElse e1 e2 e3) = do
                                   s5 <- unify (substitute s4 (substitute s3 t2)) (substitute s4 t3)
                                   return (substitute s5 (substitute s4 t3), s5 .+ s4 .+ s3 .+ s2 .+ s1)
 
--- TODO: All operators can be applied to both Nat and Bool
+-- TODO: All operators can be applied to both Nat and Bool @ Lu
 wAlg env (Operator op e1 e2) = do
                                  (t1, s1) <- wAlg env e1
                                  let s1Env = substituteEnv s1 env
@@ -225,7 +232,7 @@ wAlg env (Operator op e1 e2) = do
                                  s4 <- unify (substitute s3 t2) (LabelledType TNat L)
                                  return (LabelledType TNat L, s4 .+ s3 .+ s2 .+ s1)  -- TODO: handling type label
 
-wAlg env (TypeAnnotation e lt) = undefined
+wAlg env (TypeAnnotation e lt) = undefined -- TODO:
 
 wAlg env (Sequence e1 e2) = undefined
 
@@ -242,17 +249,15 @@ wAlg env (Pair e1 e2)   = do
                             (t2, s2) <- wAlg (substituteEnv s1 env) e2
                             let tp = pairType (substitute s2 t1) t2
                             return (tp, s2 .+ s1)
-                            
+
 wAlg env (CasePair e1 x1 e2 x2)   = undefined
 
--- Lists
+-- TODO:  Lists @ Lu
 wAlg env Nil   = undefined
 
 wAlg env (Cons x xs)   = undefined
 
 wAlg env (CaseList e1 e2 x1 x2 e3)   = undefined
-
-wAlg env _        = undefined -- TODO: fill
 
 -- W Algorithm helper functions
 
