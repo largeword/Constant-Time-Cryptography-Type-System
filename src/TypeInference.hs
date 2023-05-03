@@ -241,7 +241,10 @@ wAlg env (Operator op e1 e2) = do
                                  s4 <- unify (substitute s3 t2) (LabelledType TNat L)
                                  return (LabelledType TNat L, s4 .+ s3 .+ s2 .+ s1)  -- TODO: handling type label
 
-wAlg env (TypeAnnotation e lt) = undefined -- TODO:
+wAlg env (TypeAnnotation e lt) = do
+                                   (t, s1) <- wAlg env e
+                                   s2 <- unify t (substitute s1 lt)
+                                   return (substitute s2 t, s2 .+ s1) -- TODO: not fully working until label works
 
 wAlg env (Sequence e1 e2) = undefined
 
@@ -258,8 +261,6 @@ wAlg env (Pair e1 e2)   = do
                             (t2, s2) <- wAlg (substituteEnv s1 env) e2
                             let tp = pairType (substitute s2 t1) t2
                             return (tp, s2 .+ s1)
-
--- case e of (x, y) → e
 
 wAlg env (CasePair e1 x y e2) = do
                                   (tp, s1) <- wAlg env e1
