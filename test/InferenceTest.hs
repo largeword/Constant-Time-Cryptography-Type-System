@@ -19,7 +19,8 @@ testInference :: TestTree
 testInference = testGroup "Test Type Inference" [
     testValue,
     testLetFunc,
-    testPairCase
+    testPairCase,
+    testArraySeq
   ]
 
 -- test basic value
@@ -47,6 +48,14 @@ testPairCase = testCase "Pair and Case Pair expression" $ do
   assertSrcType "let swap = fn x -> case x of (x, y) -> (y, x) in swap (1, false)" (tpair TBool TNat)
   -- TODO: error cases
 
+testArraySeq :: TestTree
+testArraySeq = testCase "Array and Sequence expressions" $ do
+  assertSrcType "1; 2; false" TBool
+  assertSrcType "let xs = array 10 0 in (xs[0] = 1; xs[1] = 2; xs[xs[0]])" TNat
+  assertSrcType "let xs = array 10 (array 10 0) in (xs, xs[1][2])" (tpair (tarray (tarray TNat)) TNat)
+  assertSrcType "let xs = array 10 0 in let xt = array 10 true in xt[xs[1]] = false" TBool
+  -- TODO: error cases
+
 -- Type Inference Helper Functions
 
 -- constructor helpers
@@ -59,6 +68,12 @@ tfun = make2 TFun
 
 tpair :: Type -> Type -> Type
 tpair = make2 TPair
+
+tarray :: Type -> Type
+tarray = make1 TArray
+
+make1 :: (LabelledType -> Type) -> Type -> Type
+make1 f t = f (lowConf t)
 
 make2 :: (LabelledType -> LabelledType -> Type) -> Type -> Type -> Type
 make2 f t1 t2 = f (lowConf t1) (lowConf t2)

@@ -246,14 +246,47 @@ wAlg env (TypeAnnotation e lt) = do
                                    s2 <- unify t (substitute s1 lt)
                                    return (substitute s2 t, s2 .+ s1) -- TODO: not fully working until label works
 
-wAlg env (Sequence e1 e2) = undefined
+wAlg env (Sequence e1 e2) = do
+                              (_, s1) <- wAlg env e1
+                              let env' = substituteEnv s1 env
+                              (t, s2) <- wAlg env' e2
+                              return (t, s2 .+ s1)
 
 -- Arrays
-wAlg env (Array e1 e2) = undefined
+wAlg env (Array el ev) = do
+                           (tl, s1) <- wAlg env el
+                           s2 <- unify tl (LabelledType TNat L)
+                           let s3 = s2 .+ s1
+                           let env' = substituteEnv s3 env
+                           (te, s4) <- wAlg env' ev
+                           return (arrType te, s4 .+ s3)
 
-wAlg env (ArrayRead e1 e2) = undefined
+wAlg env (ArrayRead arr idx) = do
+                                  (tarr, s1) <- wAlg env arr
+                                  te <- fresh
+                                  s2 <- unify tarr (arrType te)
+                                  let s3 = s2 .+ s1
+                                  let env' = substituteEnv s3 env
+                                  (tidx, s4) <- wAlg env' idx
+                                  s5 <- unify tidx (LabelledType TNat L) -- TODO: L??
+                                  let s = s5 .+ s4 .+ s3
+                                  return (substitute s te, s)
 
-wAlg env (ArrayWrite e1 e2 e3) = undefined
+
+wAlg env (ArrayWrite arr idx el) = do
+                                      (tarr, s1) <- wAlg env arr
+                                      te <- fresh
+                                      s2 <- unify tarr (arrType te)
+                                      let s3 = s2 .+ s1
+                                      let env1 = substituteEnv s3 env
+                                      (tidx, s4) <- wAlg env1 idx
+                                      s5 <- unify tidx (LabelledType TNat L) -- TODO: L??
+                                      let s6 = s5 .+ s4 .+ s3
+                                      let env2 = substituteEnv s6 env1
+                                      (telm, s7) <- wAlg env2 el
+                                      let s8 = s7 .+ s6
+                                      s9 <- unify telm (substitute s8 te)
+                                      return (substitute s9 telm, s9 .+ s8)
 
 -- Pairs
 wAlg env (Pair e1 e2)   = do
@@ -288,6 +321,9 @@ lowConf t lbl = LabelledType t lbl
 
 varType :: TypeVar -> Label -> LabelledType
 varType v lbl = lowConf (TVar v) lbl -- TODO: use annotationvar instead of L?
+
+arrType :: LabelledType -> LabelledType
+arrType t = LabelledType (TArray t) L -- TODO: use freshAnnotationVar
 
 fnType :: LabelledType -> LabelledType -> LabelledType
 fnType (LabelledType x xlbl) (LabelledType y ylbl) = lowConf (TFun x' y') lbl
