@@ -43,8 +43,9 @@ testPairCase = testCase "Pair and Case Pair expression" $ do
   assertSrcType "let id = fn x -> x in (1, id (id id, 1))" (tpair TNat (tpair (tfun (tvar 0) (tvar 0)) TNat))
   assertSrcType "fn x -> fn y -> (x, y)" (tfun (tvar 0) (tfun (tvar 1) (tpair (tvar 0) (tvar 1))))
   assertSrcType "let pair = fn x -> fn y -> (x, y) in pair 1 3" (tpair TNat TNat)
-  -- TODO: case pair test & error cases
-
+  assertSrcType "let a = (1, (false, 1)) in case a of (x, y) -> case y of (y1, y2) -> ((y2, x), y1)" (tpair (tpair TNat TNat) TBool)
+  assertSrcType "let swap = fn x -> case x of (x, y) -> (y, x) in swap (1, false)" (tpair TBool TNat)
+  -- TODO: error cases
 
 -- Type Inference Helper Functions
 

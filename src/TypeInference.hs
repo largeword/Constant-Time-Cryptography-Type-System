@@ -145,6 +145,8 @@ getNewTypeLabel (LabelVar (AnnotationVar x)) L = LabelVar (AnnotationVar x)
 getNewTypeLabel L (LabelVar (AnnotationVar y)) = LabelVar (AnnotationVar y)
 getNewTypeLabel (LabelVar (AnnotationVar x)) (LabelVar (AnnotationVar y)) = LabelVar (AnnotationVar (if x > y then x else y))
 
+getNewTypeLabel _ _ = L -- TODO: just for completing the pattern, remove this later
+
 -- unify (U) function of W Algorithm
 unify :: LabelledType -> LabelledType -> InferenceState Substitution
 unify (LabelledType t1 lbl1) (LabelledType t2 lbl2) = unifyType t1 t2 lbl -- TODO: handle other label and their unification
@@ -257,7 +259,19 @@ wAlg env (Pair e1 e2)   = do
                             let tp = pairType (substitute s2 t1) t2
                             return (tp, s2 .+ s1)
 
-wAlg env (CasePair e1 x1 e2 x2)   = undefined
+-- case e of (x, y) → e
+
+wAlg env (CasePair e1 x y e2) = do
+                                  (tp, s1) <- wAlg env e1
+                                  vx <- fresh
+                                  vy <- fresh
+                                  s2 <- unify tp (pairType vx vy)
+                                  let tx = substitute s2 vx
+                                  let ty = substitute s2 vy
+                                  let s3 = s2 .+ s1
+                                  let env' = addTo (substituteEnv s3 env) [(x, Type tx), (y, Type ty)]
+                                  (texp, s4) <- wAlg env' e2
+                                  return (texp, s4 .+ s3)
 
 -- TODO:  Lists @ Lu
 wAlg env Nil   = undefined

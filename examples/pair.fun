@@ -1,3 +1,5 @@
-let a = (1, 2)
-in case a of
-  (x, y) -> x + y
+let swap = fn x ->
+  case x of
+    (x, y) -> (y, x)
+in
+  swap (1, false)
