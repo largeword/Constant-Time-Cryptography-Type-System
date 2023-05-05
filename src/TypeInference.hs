@@ -176,6 +176,17 @@ unifyType t          (TVar a)     l = return $ Map.singleton a (LabelledType t l
 
 unifyType t1         t2           _ = throwE $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
 
+operatorType :: Operator -> (Type, Type, Type)
+operatorType Add = (TNat, TNat, TNat)
+operatorType Subtract = (TNat, TNat, TNat)
+operatorType Multiply = (TNat, TNat, TNat)
+operatorType Divide = (TNat, TNat, TNat)
+operatorType And = (TBool, TBool, TBool)
+operatorType Or = (TBool, TBool, TBool)
+operatorType Equals = (TNat, TNat, TBool)
+operatorType LessThan = (TNat, TNat, TBool)
+operatorType NotEquals = (TNat, TNat, TBool)
+
 -- W function of W Algorithm
 wAlg :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution)
 wAlg _   (Nat _)  = return (lowConf TNat L, Map.empty)  -- TODO: need to decide the type label
@@ -237,9 +248,10 @@ wAlg env (Operator op e1 e2) = do
                                  (t1, s1) <- wAlg env e1
                                  let s1Env = substituteEnv s1 env
                                  (t2, s2) <- wAlg s1Env e2
-                                 s3 <- unify (substitute s2 t1) (LabelledType TNat L)
-                                 s4 <- unify (substitute s3 t2) (LabelledType TNat L)
-                                 return (LabelledType TNat L, s4 .+ s3 .+ s2 .+ s1)  -- TODO: handling type label
+                                 let (opT1, opT2, opT) = operatorType op
+                                 s3 <- unify (substitute s2 t1) (LabelledType opT1 L)
+                                 s4 <- unify (substitute s3 t2) (LabelledType opT2 L)
+                                 return (LabelledType opT L, s4 .+ s3 .+ s2 .+ s1)  -- TODO: handling type label
 
 wAlg env (TypeAnnotation e lt) = do
                                    (t, s1) <- wAlg env e
