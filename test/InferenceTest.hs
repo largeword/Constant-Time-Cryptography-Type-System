@@ -20,7 +20,8 @@ testInference = testGroup "Test Type Inference" [
     testValue,
     testLetFunc,
     testPairCase,
-    testArraySeq
+    testArraySeq,
+    testLists
   ]
 
 -- test basic value
@@ -56,6 +57,14 @@ testArraySeq = testCase "Array and Sequence expressions" $ do
   assertSrcType "let xs = array 10 0 in let xt = array 10 true in xt[xs[1]] = false" TBool
   -- TODO: error cases
 
+testLists :: TestTree
+testLists = testCase "Lists expressions" $ do
+  assertSrcType "let xs = Cons 1 Nil in xs" (tlist TNat)
+  assertSrcType "let xs = Cons true (Cons false Nil) in xs" (tlist TBool)
+  assertSrcType "let xs = Cons 1 (Cons 2 (Cons 3 Nil)) in xs" (tlist TNat)
+  assertSrcType "let xs = Cons 1 (Cons 2 (Cons 3 Nil)) in case xs of (Cons y ys) -> y" TNat
+  -- TODO: error cases
+
 -- Type Inference Helper Functions
 
 -- constructor helpers
@@ -71,6 +80,9 @@ tpair = make2 TPair
 
 tarray :: Type -> Type
 tarray = make1 TArray
+
+tlist :: Type -> Type
+tlist = make1 TList
 
 make1 :: (LabelledType -> Type) -> Type -> Type
 make1 f t = f (lowConf t)
