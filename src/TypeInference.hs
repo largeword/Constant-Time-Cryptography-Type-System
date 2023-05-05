@@ -10,6 +10,7 @@ import Data.Set as Set (Set, empty, insert, member, toList)
 import Control.Monad.State
 import Control.Monad.Except
 import Control.Monad.Trans.Except
+import GHC.Int (eqInt32)
 
 type TypeEnvironment = Map Id TypeScheme
 
@@ -264,7 +265,7 @@ wAlg env (Sequence e1 e2) = do
                               (t, s2) <- wAlg env' e2
                               return (t, s2 .+ s1)
 
--- Arrays
+-- Arrays 
 wAlg env (Array el ev) = do
                            (tl, s1) <- wAlg env el
                            s2 <- unify tl (LabelledType TNat L)
@@ -320,11 +321,31 @@ wAlg env (CasePair e1 x y e2) = do
                                   return (texp, s4 .+ s3)
 
 -- TODO:  Lists @ Lu
-wAlg env Nil   = undefined
+wAlg _ Nil   = do 
+                   t <- fresh
+                   return (t, Map.empty)
 
-wAlg env (Cons x xs)   = undefined
+wAlg env (Cons x xs)   = do
+                           (tx, s1) <- wAlg env x
+                           (txs, s2) <- wAlg (substituteEnv s1 env) xs
+                           s3 <- unify txs (LabelledType (TList tx) L)
+                           return (substitute s3 txs, s3 .+ s2 .+ s1)
 
-wAlg env (CaseList e1 e2 x1 x2 e3)   = undefined
+wAlg env (CaseList e1 e2 x1 x2 e3)   = do
+                                         (t1, s1) <- wAlg env e1
+                                         let env1 = substituteEnv s1 env
+                                         (t2, s2) <- wAlg env1 e2
+                                         vx1 <- fresh
+                                         vx2 <- fresh
+                                         s3 <- unify (substitute s2 t1) (LabelledType (TList vx1) L)
+                                         s4 <- unify (substitute s3 vx2) (LabelledType (TList vx1) L)
+                                         let tx1 = substitute s4 (substitute s3 vx1)
+                                         let tx2 = substitute s4 (substitute s3 vx2)
+                                         let env2 = substituteEnv s2 env1
+                                         let env3 = addTo env2 [(x1, Type tx1), (x2, Type tx2)]
+                                         (t3, s5) <- wAlg env3 e3
+                                         s6 <- unify t2 t3
+                                         return (substitute s6 t3, s6 .+ s5 .+ s4 .+ s3 .+ s2 .+ s1)
 
 -- W Algorithm helper functions
 
