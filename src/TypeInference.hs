@@ -177,16 +177,21 @@ unifyType t          (TVar a)     l = return $ Map.singleton a (LabelledType t l
 
 unifyType t1         t2           _ = throwE $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
 
-operatorType :: Operator -> (Type, Type, Type)
-operatorType Add = (TNat, TNat, TNat)
-operatorType Subtract = (TNat, TNat, TNat)
-operatorType Multiply = (TNat, TNat, TNat)
-operatorType Divide = (TNat, TNat, TNat)
-operatorType And = (TBool, TBool, TBool)
-operatorType Or = (TBool, TBool, TBool)
-operatorType Equals = (TNat, TNat, TBool)
-operatorType LessThan = (TNat, TNat, TBool)
-operatorType NotEquals = (TNat, TNat, TBool)
+operatorType :: Operator -> InferenceState (Type, Type, Type)
+operatorType Add = return (TNat, TNat, TNat)
+operatorType Subtract = return (TNat, TNat, TNat)
+operatorType Multiply = return (TNat, TNat, TNat)
+operatorType Divide = return (TNat, TNat, TNat)
+operatorType LessThan = return (TNat, TNat, TBool)
+operatorType And = return (TBool, TBool, TBool)
+operatorType Or = return (TBool, TBool, TBool)
+operatorType Equals = do
+                         t <- freshVar
+                         return (TVar t, TVar t, TBool)
+
+operatorType NotEquals = do
+                         t <- freshVar
+                         return (TVar t, TVar t, TBool)
 
 -- W function of W Algorithm
 wAlg :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution)
@@ -244,14 +249,13 @@ wAlg env (IfThenElse e1 e2 e3) = do
                                   s5 <- unify (substitute s4 (substitute s3 t2)) (substitute s4 t3)
                                   return (substitute s5 (substitute s4 t3), s5 .+ s4 .+ s3 .+ s2 .+ s1)
 
--- TODO: All operators can be applied to both Nat and Bool @ Lu
 wAlg env (Operator op e1 e2) = do
                                  (t1, s1) <- wAlg env e1
                                  let s1Env = substituteEnv s1 env
                                  (t2, s2) <- wAlg s1Env e2
-                                 let (opT1, opT2, opT) = operatorType op
-                                 s3 <- unify (substitute s2 t1) (LabelledType opT1 L)
-                                 s4 <- unify (substitute s3 t2) (LabelledType opT2 L)
+                                 (opT1, opT2, opT) <- operatorType op
+                                 s3 <- unify (substitute s2 t1) (LabelledType opT1 L)  -- TODO: handling type label
+                                 s4 <- unify (substitute s3 t2) (LabelledType opT2 L)  -- TODO: handling type label
                                  return (LabelledType opT L, s4 .+ s3 .+ s2 .+ s1)  -- TODO: handling type label
 
 wAlg env (TypeAnnotation e lt) = do
@@ -323,12 +327,12 @@ wAlg env (CasePair e1 x y e2) = do
 -- TODO:  Lists @ Lu
 wAlg _ Nil   = do 
                    t <- fresh
-                   return (t, Map.empty)
+                   return (LabelledType (TList t) L, Map.empty)
 
 wAlg env (Cons x xs)   = do
                            (tx, s1) <- wAlg env x
                            (txs, s2) <- wAlg (substituteEnv s1 env) xs
-                           s3 <- unify txs (LabelledType (TList tx) L)
+                           s3 <- unify txs (LabelledType (TList (substitute s2 tx)) L)
                            return (substitute s3 txs, s3 .+ s2 .+ s1)
 
 wAlg env (CaseList e1 e2 x1 x2 e3)   = do
@@ -344,7 +348,7 @@ wAlg env (CaseList e1 e2 x1 x2 e3)   = do
                                          let env2 = substituteEnv s2 env1
                                          let env3 = addTo env2 [(x1, Type tx1), (x2, Type tx2)]
                                          (t3, s5) <- wAlg env3 e3
-                                         s6 <- unify t2 t3
+                                         s6 <- unify (substitute (s5 .+ s4.+ s3) t2) t3
                                          return (substitute s6 t3, s6 .+ s5 .+ s4 .+ s3 .+ s2 .+ s1)
 
 -- W Algorithm helper functions

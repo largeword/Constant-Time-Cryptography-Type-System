@@ -18,6 +18,7 @@ testInference :: TestTree
 testInference = testGroup "Test Type Inference" [
     testValue,
     testLetFunc,
+    testOp,
     testPairCase,
     testArraySeq,
     testLists
@@ -35,6 +36,19 @@ testLetFunc = testCase "Function and Let binding" $ do
   assertSrcType "let id = fn x -> x in id" (tfun (tvar 0) (tvar 0))
   assertSrcType "let id = fn x -> x in id id id id 3" TNat
   assertSrcType "fun loop x -> loop 1" (tfun TNat (tvar 0))
+
+testOp :: TestTree
+testOp = testCase "Operator expressions" $ do
+  assertSrcType "let xs = 1 + 2 in xs" TNat
+  assertSrcType "let xs = true && false in xs" TBool
+  assertSrcType "let xs = 1 + 2 in let xt = 3 * 4 in xs + xt" TNat
+  assertSrcType "let xs = true == false in xs" TBool
+  assertSrcType "let xs = true != false in xs" TBool
+  assertSrcType "let xs = 1 == 2 in let xt = 3 == 4 in xs && xt" TBool
+  assertSrcType "let xs = 1 == 2 in let xt = 3 == 4 in xs || xt" TBool
+  assertSrcType "let xs = 1 < 2 in let xt = 3 < 4 in xs && xt" TBool
+  assertSrcType "let xs = 1 / 2 in xs" TNat
+  -- TODO: error cases
 
 -- test pair & case pair
 testPairCase :: TestTree
@@ -58,10 +72,9 @@ testArraySeq = testCase "Array and Sequence expressions" $ do
 
 testLists :: TestTree
 testLists = testCase "Lists expressions" $ do
-  assertSrcType "let xs = Cons 1 Nil in xs" (tlist TNat)
-  assertSrcType "let xs = Cons true (Cons false Nil) in xs" (tlist TBool)
-  assertSrcType "let xs = Cons 1 (Cons 2 (Cons 3 Nil)) in xs" (tlist TNat)
-  assertSrcType "let xs = Cons 1 (Cons 2 (Cons 3 Nil)) in case xs of (Cons y ys) -> y" TNat
+  assertSrcType "let xs = 1 : 2 : [] in xs" (tlist TNat)
+  assertSrcType "let xs = true : false : true : [] in xs" (tlist TBool)
+  assertSrcType "let xs = 1 : 2 : 3 : [] in case xs of [] -> 0 , y : ys -> y" TNat
   -- TODO: error cases
 
 -- Type Inference Helper Functions
