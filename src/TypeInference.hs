@@ -71,7 +71,7 @@ evalInference :: InferenceState a -> InferenceContext -> Either String a
 evalInference is ctx = fst (runInference is ctx)
 
 newContext :: InferenceContext
-newContext = InferenceContext {currentTypeVar = 0, currentAnnVar = 0}
+newContext = InferenceContext {currentTypeVar = 0, currentAnnVar = 0}  -- why start with 0? Is it possible to be overlapped?
 
 freshVar :: InferenceState TypeVar
 freshVar = do
@@ -324,7 +324,6 @@ wAlg env (CasePair e1 x y e2) = do
                                   (texp, s4) <- wAlg env' e2
                                   return (texp, s4 .+ s3)
 
--- TODO:  Lists @ Lu
 wAlg _ Nil   = do 
                    t <- fresh
                    return (LabelledType (TList t) L, Map.empty)
