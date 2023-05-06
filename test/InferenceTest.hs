@@ -10,7 +10,6 @@ import Test.Tasty.HUnit
 
 import Control.Monad.State
 import TypeInference (infer)
-import Data.Either (fromRight)
 import Parser (parse)
 
 -- Type Inference Test
@@ -105,13 +104,14 @@ unlabel (LabelledType t _) = t
 -- assertions
 
 assertSrcType :: String -> Type -> Assertion
-assertSrcType src ty = assertType (getR $ parseAndInfer src) (simpleType ty)
+assertSrcType src ty = assertType (assertRight "Type check failed" src $ parseAndInfer src) (simpleType ty)
 
 parseAndInfer :: String -> Either String TypeScheme
-parseAndInfer = infer . getR . parse ""
+parseAndInfer src = infer $ assertRight "Parsing failed" src $ parse "" src
 
-getR :: Either a b -> b
-getR = fromRight (error "unreachable")
+assertRight :: Show a => String -> String -> Either a b -> b
+assertRight msg input (Left a)  = error (msg ++ ": " ++ show a ++ "\n  in test input: " ++ input)
+assertRight _   _     (Right b) = b
 
 assertType :: TypeScheme -> TypeScheme -> Assertion
 assertType (Forall _ t1) (Forall _ t2) = assertType t1 t2
