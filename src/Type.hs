@@ -15,8 +15,8 @@ data TypeScheme = Forall TypeVar TypeScheme | Type LabelledType
 data LabelledType = LabelledType Type Label
 data Label = H | L | LabelVar AnnotationVar
 newtype AnnotationVar = AnnotationVar Int
+                        deriving (Eq, Ord)
 
-deriving instance Eq AnnotationVar
 deriving instance Eq Label
 deriving instance Eq LabelledType
 

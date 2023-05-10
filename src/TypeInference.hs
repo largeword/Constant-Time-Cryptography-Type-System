@@ -10,7 +10,6 @@ import Data.Set as Set (Set, empty, insert, member, toList)
 import Control.Monad.State
 import Control.Monad.Except
 import Control.Monad.Trans.Except
-import GHC.Int (eqInt32)
 
 type TypeEnvironment = Map Id TypeScheme
 
@@ -25,15 +24,21 @@ getType env id = case Map.lookup id env of
                    Nothing -> Left $ "Identifier not found: " ++ id
                    Just t  -> Right t
 
-type Substitution = Map TypeVar LabelledType
---  Map AnnotationVar Label
+data Substitution = Substitution {typeMap :: Map TypeVar LabelledType, labelMap ::  Map AnnotationVar Label}
+
+newSubstitution :: Substitution
+newSubstitution = Substitution {typeMap = Map.empty, labelMap = Map.empty};
 
 -- substitute labelled type
 substitute :: Substitution -> LabelledType -> LabelledType
 substitute substMap (LabelledType t l) = substituteType substMap t l -- TODO: handle label?
 
+substituteLabel :: Substitution -> Label -> Label
+substituteLabel _ lbl = lbl -- TODO: define?
+
+-- TODO: substitute Label with labelMap lookup?
 substituteType :: Substitution -> Type -> Label -> LabelledType
-substituteType s (TVar v) lbl = case Map.lookup v s of
+substituteType s (TVar v) lbl = case Map.lookup v (typeMap s) of
                                   Just t -> t
                                   Nothing -> LabelledType (TVar v) lbl
 
@@ -57,8 +62,18 @@ substituteTS substMap (Type lt) = Type (substitute substMap lt)
 infixr 9 .+
 -- substMapNew should be obtained after substMapOld
 (.+) :: Substitution -> Substitution -> Substitution
-(.+) substMapNew substMapOld = substMapNew `union` fmap update substMapOld
-                               where update = substitute substMapNew
+(.+) substMapNew substMapOld = Substitution {
+                                typeMap = typeMapUnion,
+                                labelMap = labelMapUnion
+                                }
+                               where
+                                  newLabelMap = labelMap substMapNew
+                                  oldLabelMap = labelMap substMapOld
+                                  labelMapUnion = newLabelMap `union` fmap (substituteLabel substMapNew) oldLabelMap
+                                  substMapNew' = substMapNew {labelMap = labelMapUnion}
+                                  newTypeMap = typeMap substMapNew'
+                                  oldTypeMap = typeMap substMapOld
+                                  typeMapUnion = newTypeMap `union` fmap (substitute substMapNew') oldTypeMap
 
 data InferenceContext = InferenceContext { currentTypeVar :: Int, currentAnnVar :: Int }
 
@@ -154,8 +169,8 @@ unify (LabelledType t1 lbl1) (LabelledType t2 lbl2) = unifyType t1 t2 lbl -- TOD
                                                     where lbl = getNewTypeLabel lbl1 lbl2
 
 unifyType :: Type -> Type -> Label -> InferenceState Substitution
-unifyType TNat       TNat         _ = return Map.empty
-unifyType TBool      TBool        _ = return Map.empty
+unifyType TNat       TNat         _ = return newSubstitution
+unifyType TBool      TBool        _ = return newSubstitution
 unifyType (TFun x y) (TFun x' y') _ = do
                                       s1 <- unify x x'
                                       let sub = substitute s1
@@ -172,8 +187,8 @@ unifyType (TList t1)  (TList t2)  _ = unify t1 t2
 unifyType (TArray t1) (TArray t2) _ = unify t1 t2
 
 -- it should be okay to not check whether a is in ftv(t) since there should be no free variable in t
-unifyType (TVar a)   t            l = return $ Map.singleton a (LabelledType t l)
-unifyType t          (TVar a)     l = return $ Map.singleton a (LabelledType t l)
+unifyType (TVar a)   t            l = return $ Substitution { typeMap = Map.singleton a (LabelledType t l), labelMap = Map.empty }
+unifyType t          (TVar a)     l = return $ Substitution { typeMap = Map.singleton a (LabelledType t l), labelMap = Map.empty }
 
 unifyType t1         t2           _ = throwE $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
 
@@ -195,12 +210,12 @@ operatorType NotEquals = do
 
 -- W function of W Algorithm
 wAlg :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution)
-wAlg _   (Nat _)  = return (lowConf TNat L, Map.empty)  -- TODO: need to decide the type label
-wAlg _   (Bool _) = return (lowConf TBool L, Map.empty)  -- TODO: need to decide the type label
+wAlg _   (Nat _)  = return (lowConf TNat L, newSubstitution)  -- TODO: need to decide the type label
+wAlg _   (Bool _) = return (lowConf TBool L, newSubstitution)  -- TODO: need to decide the type label
 wAlg env (Var id) = do
                       ts <- except $ getType env id
                       ty <- instantiate ts
-                      return (ty, Map.empty)
+                      return (ty, newSubstitution)
 
 wAlg env (Let x e1 e2)  = do
                             (t1, s1) <- wAlg env e1
@@ -269,7 +284,7 @@ wAlg env (Sequence e1 e2) = do
                               (t, s2) <- wAlg env' e2
                               return (t, s2 .+ s1)
 
--- Arrays 
+-- Arrays
 wAlg env (Array el ev) = do
                            (tl, s1) <- wAlg env el
                            s2 <- unify tl (LabelledType TNat L)
@@ -324,9 +339,9 @@ wAlg env (CasePair e1 x y e2) = do
                                   (texp, s4) <- wAlg env' e2
                                   return (texp, s4 .+ s3)
 
-wAlg _ Nil   = do 
+wAlg _ Nil   = do
                    t <- fresh
-                   return (LabelledType (TList t) L, Map.empty)
+                   return (LabelledType (TList t) L, newSubstitution)
 
 wAlg env (Cons x xs)   = do
                            (tx, s1) <- wAlg env x
