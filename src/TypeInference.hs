@@ -119,7 +119,7 @@ generalize env t = do
 ftv :: TypeEnvironment -> Set TypeVar
 ftv = foldr collect Set.empty
       where collect (Forall a ts) s = collect ts (Set.insert a s)
-            collect (Type _) s = s
+            collect (Type ts) s = findVars s s ts
 
 findVars :: Set TypeVar -> Set TypeVar -> LabelledType -> Set TypeVar
 findVars ftvs acc (LabelledType t _) = findVarsT ftvs acc t

@@ -1,5 +1,5 @@
-let swap = fn x ->
-  case x of
-    (x, y) -> (y, x)
+let f1 =
+  fn x ->
+    let f2 = fn y -> (x, y) in f2
 in
-  swap (1, false)
+  f1 1

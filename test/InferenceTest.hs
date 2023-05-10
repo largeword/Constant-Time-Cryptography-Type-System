@@ -38,6 +38,8 @@ testLetFunc = testCase "Function and Let binding" $ do
   assertSrcType "let id = fn x -> x in id" (tfun (tvar 0) (tvar 0))
   assertSrcType "let id = fn x -> x in id id id id 3" TNat
   assertSrcType "fun loop x -> loop 1" (tfun TNat (tvar 0))
+  assertSrcType "let f1 = fn x -> let f2 = fn y -> (x, y) in f2 in f1 1" (tfun (tvar 0) (tpair TNat (tvar 0)))
+
   assertTypeMismatch "let add1 = fn x -> x + 1 in add1 true"
 
 testOp :: TestTree
