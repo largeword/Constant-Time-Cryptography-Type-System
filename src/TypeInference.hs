@@ -1,3 +1,5 @@
+{-# LANGUAGE NamedFieldPuns #-}
+
 module TypeInference (
   infer
 ) where
@@ -26,8 +28,11 @@ getType env id = case Map.lookup id env of
 
 data Substitution = Substitution {typeMap :: Map TypeVar LabelledType, labelMap ::  Map AnnotationVar Label}
 
-newSubstitution :: Substitution
-newSubstitution = Substitution {typeMap = Map.empty, labelMap = Map.empty};
+emptySubs :: Substitution
+emptySubs = newSubs Map.empty Map.empty
+
+newSubs :: Map TypeVar LabelledType -> Map AnnotationVar Label -> Substitution
+newSubs typeMap labelMap = Substitution {typeMap, labelMap};
 
 -- substitute labelled type
 substitute :: Substitution -> LabelledType -> LabelledType
@@ -169,8 +174,8 @@ unify (LabelledType t1 lbl1) (LabelledType t2 lbl2) = unifyType t1 t2 lbl -- TOD
                                                     where lbl = getNewTypeLabel lbl1 lbl2
 
 unifyType :: Type -> Type -> Label -> InferenceState Substitution
-unifyType TNat       TNat         _ = return newSubstitution
-unifyType TBool      TBool        _ = return newSubstitution
+unifyType TNat       TNat         _ = return emptySubs
+unifyType TBool      TBool        _ = return emptySubs
 unifyType (TFun x y) (TFun x' y') _ = do
                                       s1 <- unify x x'
                                       let sub = substitute s1
@@ -187,8 +192,8 @@ unifyType (TList t1)  (TList t2)  _ = unify t1 t2
 unifyType (TArray t1) (TArray t2) _ = unify t1 t2
 
 -- it should be okay to not check whether a is in ftv(t) since there should be no free variable in t
-unifyType (TVar a)   t            l = return $ Substitution { typeMap = Map.singleton a (LabelledType t l), labelMap = Map.empty }
-unifyType t          (TVar a)     l = return $ Substitution { typeMap = Map.singleton a (LabelledType t l), labelMap = Map.empty }
+unifyType (TVar a)   t            l = return $ newSubs (Map.singleton a (LabelledType t l)) Map.empty
+unifyType t          (TVar a)     l = return $ newSubs (Map.singleton a (LabelledType t l)) Map.empty
 
 unifyType t1         t2           _ = throwE $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
 
@@ -210,12 +215,12 @@ operatorType NotEquals = do
 
 -- W function of W Algorithm
 wAlg :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution)
-wAlg _   (Nat _)  = return (lowConf TNat L, newSubstitution)  -- TODO: need to decide the type label
-wAlg _   (Bool _) = return (lowConf TBool L, newSubstitution)  -- TODO: need to decide the type label
+wAlg _   (Nat _)  = return (lowConf TNat L, emptySubs)  -- TODO: need to decide the type label
+wAlg _   (Bool _) = return (lowConf TBool L, emptySubs)  -- TODO: need to decide the type label
 wAlg env (Var id) = do
                       ts <- except $ getType env id
                       ty <- instantiate ts
-                      return (ty, newSubstitution)
+                      return (ty, emptySubs)
 
 wAlg env (Let x e1 e2)  = do
                             (t1, s1) <- wAlg env e1
@@ -341,7 +346,7 @@ wAlg env (CasePair e1 x y e2) = do
 
 wAlg _ Nil   = do
                    t <- fresh
-                   return (LabelledType (TList t) L, newSubstitution)
+                   return (LabelledType (TList t) L, emptySubs)
 
 wAlg env (Cons x xs)   = do
                            (tx, s1) <- wAlg env x
