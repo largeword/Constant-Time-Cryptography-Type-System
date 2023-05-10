@@ -11,6 +11,8 @@ import Test.Tasty.HUnit
 import Control.Monad.State
 import TypeInference (infer)
 import Parser (parse)
+import Data.Char (toLower)
+import Data.List (isInfixOf)
 
 -- Type Inference Test
 
@@ -36,6 +38,7 @@ testLetFunc = testCase "Function and Let binding" $ do
   assertSrcType "let id = fn x -> x in id" (tfun (tvar 0) (tvar 0))
   assertSrcType "let id = fn x -> x in id id id id 3" TNat
   assertSrcType "fun loop x -> loop 1" (tfun TNat (tvar 0))
+  assertTypeMismatch "let add1 = fn x -> x + 1 in add1 true"
 
 testOp :: TestTree
 testOp = testCase "Operator expressions" $ do
@@ -116,11 +119,26 @@ unlabel (LabelledType t _) = t
 
 -- assertions
 
+assertTypeMismatch :: String -> Assertion
+assertTypeMismatch = assertTypeError "mismatched type"
+
+assertTypeError :: String -> String -> Assertion
+assertTypeError msg src = assertLeft msg src $ parseAndInfer src
+
 assertSrcType :: String -> Type -> Assertion
 assertSrcType src ty = assertType (assertRight "Type check failed" src $ parseAndInfer src) (simpleType ty)
 
 parseAndInfer :: String -> Either String TypeScheme
 parseAndInfer src = infer $ assertRight "Parsing failed" src $ parse "" src
+
+lowercase :: [Char] -> [Char]
+lowercase = map toLower
+
+assertLeft :: String -> String -> Either String b -> Assertion
+assertLeft msg input (Left e) = if lowercase msg `isInfixOf` lowercase e
+                                then assertBool "" True
+                                else error ("Assertion failed: Error must contain " ++ msg ++ ", where the error is " ++ e)
+assertLeft _ input (Right _) = error ("Assertion failed: Type check success when error is expected" ++ "\n  in test input: " ++ input)
 
 assertRight :: Show a => String -> String -> Either a b -> b
 assertRight msg input (Left a)  = error (msg ++ ": " ++ show a ++ "\n  in test input: " ++ input)
