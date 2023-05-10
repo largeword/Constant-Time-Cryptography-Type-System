@@ -20,6 +20,7 @@ testInference :: TestTree
 testInference = testGroup "Test Type Inference" [
     testValue,
     testLetFunc,
+    testIfElse,
     testOp,
     testPairCase,
     testArraySeq,
@@ -39,8 +40,22 @@ testLetFunc = testCase "Function and Let binding" $ do
   assertSrcType "let id = fn x -> x in id id id id 3" TNat
   assertSrcType "fun loop x -> loop 1" (tfun TNat (tvar 0))
   assertSrcType "let f1 = fn x -> let f2 = fn y -> (x, y) in f2 in f1 1" (tfun (tvar 0) (tpair TNat (tvar 0)))
+  assertSrcType "fun f x -> if x < 1 then 0 else 1 + f (x - 1)" (tfun TNat TNat)
+  assertSrcType "fn m -> fun f x -> m x (f (x-1))" (tfuns [tfuns [TNat, tvar 0, tvar 0], TNat, tvar 0])
 
   assertTypeMismatch "let add1 = fn x -> x + 1 in add1 true"
+  assertTypeMismatch "1 1"
+
+testIfElse :: TestTree
+testIfElse = testCase "If-Else expressions" $ do
+  assertSrcType "if true then 1 else 1" TNat
+  assertSrcType "if true then fn x -> x else fn x -> x + 1" (tfun TNat TNat)
+  assertSrcType "fn c -> fn x -> if c then (x < 0) else (x == 3)" (tfuns [TBool, TNat, TBool])
+  assertSrcType "let check = fn c -> if c then 1 else 2 in check true" TNat
+
+  assertTypeMismatch "if 1 then 1 else 1"
+  assertTypeMismatch "if true then false else 1"
+  assertTypeMismatch "let check = fn c -> if c then 1 else 2 in check 1"
 
 testOp :: TestTree
 testOp = testCase "Operator expressions" $ do
@@ -55,25 +70,44 @@ testOp = testCase "Operator expressions" $ do
   assertSrcType "let xs = 1 / 2 in xs" TNat
   -- TODO: error cases
 
+  assertTypeMismatch "1 == true"
+  assertTypeMismatch "1 != false"
+
 -- test pair & case pair
 testPairCase :: TestTree
 testPairCase = testCase "Pair and Case Pair expression" $ do
   assertSrcType "(1, false)" (tpair TNat TBool)
   assertSrcType "let id = fn x -> x in id (id 1, id false)" (tpair TNat TBool)
   assertSrcType "let id = fn x -> x in (1, id (id id, 1))" (tpair TNat (tpair (tfun (tvar 0) (tvar 0)) TNat))
-  assertSrcType "fn x -> fn y -> (x, y)" (tfun (tvar 0) (tfun (tvar 1) (tpair (tvar 0) (tvar 1))))
+  assertSrcType "fn x -> fn y -> (x, y)" (tfuns [tvar 0, tvar 1, tpair (tvar 0) (tvar 1)])
   assertSrcType "let pair = fn x -> fn y -> (x, y) in pair 1 3" (tpair TNat TNat)
   assertSrcType "let a = (1, (false, 1)) in case a of (x, y) -> case y of (y1, y2) -> ((y2, x), y1)" (tpair (tpair TNat TNat) TBool)
-  assertSrcType "let swap = fn x -> case x of (x, y) -> (y, x) in swap (1, false)" (tpair TBool TNat)
-  -- TODO: error cases
+  assertSrcType "let swap = fn x -> case x of (x, y) -> (y, x) in swap (1, (false, 1))" (tpair (tpair TBool TNat) TNat)
+  assertSrcType "(1, true) == (0, false)" TBool
+
+  assertTypeMismatch "case 1 of (x, y) -> (y, x)"
+  assertTypeMismatch "let swap = fn p -> case p of (x, y) -> (y, x) in swap true"
+  assertTypeMismatch "let id = fn x -> x in case id of (x, y) -> (y, x)"
+  assertTypeMismatch "let add = fn p -> case p of (x, y) -> (x + 1, y + 1) in add (true, true)"
+  assertTypeMismatch "case (1, true) of (x, y) -> x == y"
 
 testArraySeq :: TestTree
 testArraySeq = testCase "Array and Sequence expressions" $ do
   assertSrcType "1; 2; false" TBool
+  assertSrcType "1; 2" TNat
+  assertSrcType "fn x -> (1; 2; x)" (tfun (tvar 0) (tvar 0))
+  assertSrcType "array 10 true" (tarray TBool)
   assertSrcType "let xs = array 10 0 in (xs[0] = 1; xs[1] = 2; xs[xs[0]])" TNat
   assertSrcType "let xs = array 10 (array 10 0) in (xs, xs[1][2])" (tpair (tarray (tarray TNat)) TNat)
   assertSrcType "let xs = array 10 0 in let xt = array 10 true in xt[xs[1]] = false" TBool
-  -- TODO: error cases
+  assertSrcType "fn n -> fn x -> array n x" (tfun TNat (tfun (tvar 0) (tarray (tvar 0))))
+  assertSrcType "let pos = fn xs -> fn i -> fn j -> xs[i][j] in pos (array 10 (array 5 0))" (tfun TNat (tfun TNat TNat))
+
+  assertTypeMismatch "array true 10"
+  assertTypeMismatch "let xs = array 10 0 in xs[0] = false"
+  assertTypeMismatch "let xs = array 10 0 in xs[true]"
+  assertTypeMismatch "let xs = array 10 0 in xs[5][3]"
+  assertTypeMismatch "let xs = array 10 true in xs[0] + 1"
 
 testLists :: TestTree
 testLists = testCase "Lists expressions" $ do
@@ -91,6 +125,11 @@ tvar = TVar . TypeVar
 
 tfun :: Type -> Type -> Type
 tfun = make2 TFun
+
+tfuns :: [Type] -> Type
+tfuns [x, y] = tfun x y
+tfuns (x:xs) = tfun x (tfuns xs)
+tfuns _ = error "Invalid tfuns construction"
 
 tpair :: Type -> Type -> Type
 tpair = make2 TPair
