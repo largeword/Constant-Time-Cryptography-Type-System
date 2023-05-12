@@ -1,25 +1,48 @@
 TODO:
-1. define data structures:
+- Constraint datatype
+- W should return Constraint
+- Subtyping
+- Label rules for simple things: Nat, Bool
+- Label rules & CTC rule in if, arrays, etc, return error if violated
+- Constraints solver
 
-  - environment
-    Map Id TypeScheme
+notes:
+H <= L
 
-  - substitutions
-    func
-    - Subs = Map TypeVar Type
-    - func : Subs -> Type -> Type
-    - func : Subs -> TypeEnv -> TypeEnv
 
-        TypeEnv -> TypeEnv
-        Type -> Type
+let div5 = fn x -> x / 5 -- div5 L -> L
 
-        subs a -> Int
-        subs(array[a]) --> array[int]
+/ is not constant --> e1 / e2 , e1 : L, e2 : L
 
-  - functions / monad? for making new type var
+if ec then e1 else e2
+-- ec must be L
+e1 e2 can subtype
 
-  - 4 functions of Algorithm W
-    - instatiate
-    - generalize
-    - U
-    - W
+ea[ei] = e
+ea[ei]
+
+1 L
+
+true L
+
+1 :: Nat^H
+
+(1 :: Nat^H) :: Nat^L -- error!
+
+ei must be L
+
+t ea = t e
+ea : H, e : L
+
+(l1, l2) -> subtype of l1 & l2
+
+array l -> l
+
+List l -> l
+
+case e of (x, y) -->
+
+
+case e_list of e_list L
+  [] -> ... t1
+  x:xs -> t2
