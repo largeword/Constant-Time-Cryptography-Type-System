@@ -49,7 +49,7 @@ pIndex = do
   return $ foldl ArrayRead base indices
 
 pApp :: Parser Expr
-pApp = 
+pApp =
   Array <$ pKeyword "array" <* pWhitespace <*> pAtom <*> pAtom
   <|> (do
     base <- pIndex
@@ -182,7 +182,7 @@ pType = do
   (atomic, base) <- pTypeApp
   if atomic then
     -- We might just have parsed the first argument of a function type
-    option base (fun base <$> pLabel <* pWhitespace <* string "->" <* pWhitespace <*> pLabelledType)
+    option base (fun base <$> try (pLabel <* pWhitespace <* string "->") <* pWhitespace <*> pLabelledType)
   else
     return base
   where
