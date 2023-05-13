@@ -5,10 +5,11 @@ module TypeInference (
 ) where
 
 import AST
+import Constraint
 import Type
 
 import Data.Map as Map (Map, empty, lookup, union, insert, singleton)
-import Data.Set as Set (Set, empty, insert, member, toList)
+import Data.Set as Set (Set, empty, insert, member, toList, union, map)
 import Control.Monad.State
 import Control.Monad.Except
 import Control.Monad.Trans.Except
@@ -64,6 +65,12 @@ substituteTS :: Substitution -> TypeScheme -> TypeScheme
 substituteTS substMap (Forall v ts) = Forall v (substituteTS substMap ts)
 substituteTS substMap (Type lt) = Type (substitute substMap lt)
 
+substituteConstr :: Substitution -> Constraint -> Constraint
+substituteConstr sub (Constraint l1 l2) = Constraint (substituteLabel sub l1) (substituteLabel sub l2)
+
+substituteConstrs :: Substitution -> Constraints -> Constraints
+substituteConstrs sub = Set.map (substituteConstr sub)
+
 infixr 9 .+
 -- substMapNew should be obtained after substMapOld
 (.+) :: Substitution -> Substitution -> Substitution
@@ -74,11 +81,11 @@ infixr 9 .+
                                where
                                   newLabelMap = labelMap substMapNew
                                   oldLabelMap = labelMap substMapOld
-                                  labelMapUnion = newLabelMap `union` fmap (substituteLabel substMapNew) oldLabelMap
+                                  labelMapUnion = newLabelMap `Map.union` fmap (substituteLabel substMapNew) oldLabelMap
                                   substMapNew' = substMapNew {labelMap = labelMapUnion}
                                   newTypeMap = typeMap substMapNew'
                                   oldTypeMap = typeMap substMapOld
-                                  typeMapUnion = newTypeMap `union` fmap (substitute substMapNew') oldTypeMap
+                                  typeMapUnion = newTypeMap `Map.union` fmap (substitute substMapNew') oldTypeMap
 
 data InferenceContext = InferenceContext { currentTypeVar :: Int, currentAnnVar :: Int }
 
@@ -214,26 +221,26 @@ operatorType NotEquals = do
                          return (TVar t, TVar t, TBool)
 
 -- W function of W Algorithm
-wAlg :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution)
-wAlg _   (Nat _)  = return (lowConf TNat L, emptySubs)  -- TODO: need to decide the type label
-wAlg _   (Bool _) = return (lowConf TBool L, emptySubs)  -- TODO: need to decide the type label
+wAlg :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution, Constraints)
+wAlg _   (Nat _)  = return (lowConf TNat, emptySubs, emptyConstraints)
+wAlg _   (Bool _) = return (lowConf TBool, emptySubs, emptyConstraints)
 wAlg env (Var id) = do
                       ts <- except $ getType env id
                       ty <- instantiate ts
-                      return (ty, emptySubs)
+                      return (ty, emptySubs, emptyConstraints)
 
 wAlg env (Let x e1 e2)  = do
-                            (t1, s1) <- wAlg env e1
+                            (t1, s1, c1) <- wAlg env e1
                             let env' = substituteEnv s1 env
                             tx <- generalize env' t1
-                            (t2, s2) <- wAlg (Map.insert x tx env') e2
-                            return (t2, s2 .+ s1)
+                            (t2, s2, c2) <- wAlg (Map.insert x tx env') e2
+                            return (t2, s2 .+ s1, Set.union c2 (substituteConstrs s2 c1))
 
 wAlg env (Fn x expr) = do
                           a <- fresh
-                          (ty, s) <- wAlg (Map.insert x (Type a) env) expr
+                          (ty, s, c1) <- wAlg (Map.insert x (Type a) env) expr
                           let tf = fnType (substitute s a) ty
-                          return (tf, s)
+                          return (tf, s, substituteConstrs s c1) -- TODO: correct constraint?
 
 wAlg env (Fun f x expr) = do
                             a1 <- fresh
@@ -241,99 +248,103 @@ wAlg env (Fun f x expr) = do
                             let tf = fnType a1 a2
                             let env' = addTo env [(x, Type a1), (f, Type tf)]
 
-                            (tret, s1) <- wAlg env' expr
+                            (tret, s1, c1) <- wAlg env' expr
                             s2 <- unify tret (substitute s1 a2)
 
                             let s = s2 .+ s1
                             let sub = substitute s
                             let tfun = fnType (sub a1) (sub tret)
 
-                            return (tfun, s)
+                            return (tfun, s, substituteConstrs s c1) -- TODO: correct constraint?
 
 wAlg env (App e1 e2)    = do
-                            (t1, s1) <- wAlg env e1
-                            (t2, s2) <- wAlg (substituteEnv s1 env) e2
+                            (t1, s1, c1) <- wAlg env e1
+                            (t2, s2, c2) <- wAlg (substituteEnv s1 env) e2
                             a <- fresh
                             let tfun = fnType t2 a
                             s3 <- unify (substitute s2 t1) tfun
-                            return (substitute s3 a, s3 .+ s2 .+ s1)
+                            let s4 = s3 .+ s2 .+ s1
+                            return (substitute s3 a, s4, emptyConstraints) -- TODO: constraints and subtype/effect?
 
 wAlg env (IfThenElse e1 e2 e3) = do
-                                  (t1, s1) <- wAlg env e1
+                                  (t1, s1, c1) <- wAlg env e1
                                   let s1Env = substituteEnv s1 env
-                                  (t2, s2) <- wAlg s1Env e2
+                                  (t2, s2, c2) <- wAlg s1Env e2
                                   let s2Env = substituteEnv s2 s1Env
-                                  (t3, s3) <- wAlg s2Env e3
+                                  (t3, s3, c3) <- wAlg s2Env e3
                                   let s3Env = substituteEnv s3 s2Env
-                                  s4 <- unify (substitute s3 (substitute s2 t1)) (LabelledType TBool L)
+                                  s4 <- unify (substitute s3 (substitute s2 t1)) (LabelledType TBool L) -- TODO: label type?
                                   s5 <- unify (substitute s4 (substitute s3 t2)) (substitute s4 t3)
-                                  return (substitute s5 (substitute s4 t3), s5 .+ s4 .+ s3 .+ s2 .+ s1)
+                                  let s6 = s5 .+ s4 .+ s3 .+ s2 .+ s1
+                                  return (substitute s6 t3, s6, emptyConstraints)  -- TODO: constraints and subtype/effect?
 
 wAlg env (Operator op e1 e2) = do
-                                 (t1, s1) <- wAlg env e1
+                                 (t1, s1, c1) <- wAlg env e1
                                  let s1Env = substituteEnv s1 env
-                                 (t2, s2) <- wAlg s1Env e2
+                                 (t2, s2, c2) <- wAlg s1Env e2
                                  (opT1, opT2, opT) <- operatorType op
                                  s3 <- unify (substitute s2 t1) (LabelledType opT1 L)  -- TODO: handling type label
                                  s4 <- unify (substitute s3 t2) (substitute s3 (LabelledType opT2 L))  -- TODO: handling type label
-                                 return (LabelledType opT L, s4 .+ s3 .+ s2 .+ s1)  -- TODO: handling type label
+                                 return (LabelledType opT L, s4 .+ s3 .+ s2 .+ s1, emptyConstraints)  -- TODO: handling type label
+                                 -- TODO: constraints and subtype/effect?
 
 wAlg env (TypeAnnotation e lt) = do
-                                   (t, s1) <- wAlg env e
+                                   (t, s1, c1) <- wAlg env e
                                    s2 <- unify t (substitute s1 lt)
-                                   return (substitute s2 t, s2 .+ s1) -- TODO: not fully working until label works
+                                   return (substitute s2 t, s2 .+ s1, emptyConstraints) -- TODO: not fully working until label works
+                                   -- TODO: constraints and subtype/effect?
 
 wAlg env (Sequence e1 e2) = do
-                              (_, s1) <- wAlg env e1
+                              (_, s1, c1) <- wAlg env e1
                               let env' = substituteEnv s1 env
-                              (t, s2) <- wAlg env' e2
-                              return (t, s2 .+ s1)
+                              (t, s2, c2) <- wAlg env' e2
+                              return (t, s2 .+ s1, emptyConstraints) -- TODO: constraints?
 
 -- Arrays
 wAlg env (Array el ev) = do
-                           (tl, s1) <- wAlg env el
+                           (tl, s1, c1) <- wAlg env el
                            s2 <- unify tl (LabelledType TNat L)
                            let s3 = s2 .+ s1
                            let env' = substituteEnv s3 env
-                           (te, s4) <- wAlg env' ev
-                           return (arrType te, s4 .+ s3)
+                           (te, s4, c2) <- wAlg env' ev
+                           return (arrType te, s4 .+ s3, emptyConstraints) -- TODO: constraints?
 
 wAlg env (ArrayRead arr idx) = do
-                                  (tarr, s1) <- wAlg env arr
+                                  (tarr, s1, c1) <- wAlg env arr
                                   te <- fresh
                                   s2 <- unify tarr (arrType te)
                                   let s3 = s2 .+ s1
                                   let env' = substituteEnv s3 env
-                                  (tidx, s4) <- wAlg env' idx
+                                  (tidx, s4, c2) <- wAlg env' idx
                                   s5 <- unify tidx (LabelledType TNat L) -- TODO: L??
                                   let s = s5 .+ s4 .+ s3
-                                  return (substitute s te, s)
+                                  return (substitute s te, s, emptyConstraints) -- TODO: constraints?
 
 
 wAlg env (ArrayWrite arr idx el) = do
-                                      (tarr, s1) <- wAlg env arr
+                                      (tarr, s1, c1) <- wAlg env arr
                                       te <- fresh
                                       s2 <- unify tarr (arrType te)
                                       let s3 = s2 .+ s1
                                       let env1 = substituteEnv s3 env
-                                      (tidx, s4) <- wAlg env1 idx
+                                      (tidx, s4, c2) <- wAlg env1 idx
                                       s5 <- unify tidx (LabelledType TNat L) -- TODO: L??
                                       let s6 = s5 .+ s4 .+ s3
                                       let env2 = substituteEnv s6 env1
-                                      (telm, s7) <- wAlg env2 el
+                                      (telm, s7, c3) <- wAlg env2 el
                                       let s8 = s7 .+ s6
                                       s9 <- unify telm (substitute s8 te)
-                                      return (substitute s9 telm, s9 .+ s8)
+                                      return (substitute s9 telm, s9 .+ s8, emptyConstraints) -- TODO: constraints?
 
 -- Pairs
 wAlg env (Pair e1 e2)   = do
-                            (t1, s1) <- wAlg env e1
-                            (t2, s2) <- wAlg (substituteEnv s1 env) e2
+                            (t1, s1, c1) <- wAlg env e1
+                            (t2, s2, c2) <- wAlg (substituteEnv s1 env) e2
                             let tp = pairType (substitute s2 t1) t2
-                            return (tp, s2 .+ s1)
+                            return (tp, s2 .+ s1, emptyConstraints) -- TODO: constraints?
 
 wAlg env (CasePair e1 x y e2) = do
-                                  (tp, s1) <- wAlg env e1
+                                  (tp, s1, c1) <- wAlg env e1
                                   vx <- fresh
                                   vy <- fresh
                                   s2 <- unify tp (pairType vx vy)
@@ -341,23 +352,23 @@ wAlg env (CasePair e1 x y e2) = do
                                   let ty = substitute s2 vy
                                   let s3 = s2 .+ s1
                                   let env' = addTo (substituteEnv s3 env) [(x, Type tx), (y, Type ty)]
-                                  (texp, s4) <- wAlg env' e2
-                                  return (texp, s4 .+ s3)
+                                  (texp, s4, c2) <- wAlg env' e2
+                                  return (texp, s4 .+ s3, emptyConstraints) -- TODO: constraints?
 
 wAlg _ Nil   = do
                    t <- fresh
-                   return (LabelledType (TList t) L, emptySubs)
+                   return (LabelledType (TList t) L, emptySubs, emptyConstraints) -- TODO: correct constraints? L or type annotate??
 
 wAlg env (Cons x xs)   = do
-                           (tx, s1) <- wAlg env x
-                           (txs, s2) <- wAlg (substituteEnv s1 env) xs
+                           (tx, s1, c1) <- wAlg env x
+                           (txs, s2, c2) <- wAlg (substituteEnv s1 env) xs
                            s3 <- unify txs (LabelledType (TList (substitute s2 tx)) L)
-                           return (substitute s3 txs, s3 .+ s2 .+ s1)
+                           return (substitute s3 txs, s3 .+ s2 .+ s1, emptyConstraints) -- TODO: constraints?
 
 wAlg env (CaseList e1 e2 x1 x2 e3)   = do
-                                         (t1, s1) <- wAlg env e1
+                                         (t1, s1, c1) <- wAlg env e1
                                          let env1 = substituteEnv s1 env
-                                         (t2, s2) <- wAlg env1 e2
+                                         (t2, s2, c2) <- wAlg env1 e2
                                          vx1 <- fresh
                                          vx2 <- fresh
                                          s3 <- unify (substitute s2 t1) (LabelledType (TList vx1) L)
@@ -366,30 +377,30 @@ wAlg env (CaseList e1 e2 x1 x2 e3)   = do
                                          let tx2 = substitute s4 (substitute s3 vx2)
                                          let env2 = substituteEnv s2 env1
                                          let env3 = addTo env2 [(x1, Type tx1), (x2, Type tx2)]
-                                         (t3, s5) <- wAlg env3 e3
+                                         (t3, s5, c3) <- wAlg env3 e3
                                          s6 <- unify (substitute (s5 .+ s4.+ s3) t2) t3
-                                         return (substitute s6 t3, s6 .+ s5 .+ s4 .+ s3 .+ s2 .+ s1)
+                                         return (substitute s6 t3, s6 .+ s5 .+ s4 .+ s3 .+ s2 .+ s1, emptyConstraints) -- TODO: constraints?
 
 -- W Algorithm helper functions
 
-lowConf :: Type -> Label -> LabelledType
-lowConf t lbl = LabelledType t lbl
+lowConf :: Type -> LabelledType
+lowConf t = LabelledType t L
 
 varType :: TypeVar -> Label -> LabelledType
-varType v lbl = lowConf (TVar v) lbl -- TODO: use annotationvar instead of L?
+varType v lbl = LabelledType (TVar v) lbl -- TODO: use annotationvar instead of L?
 
 arrType :: LabelledType -> LabelledType
 arrType t = LabelledType (TArray t) L -- TODO: use freshAnnotationVar
 
 fnType :: LabelledType -> LabelledType -> LabelledType
-fnType (LabelledType x xlbl) (LabelledType y ylbl) = lowConf (TFun x' y') lbl
+fnType (LabelledType x xlbl) (LabelledType y ylbl) = LabelledType (TFun x' y') lbl
                                                      where x' = LabelledType x xlbl
                                                            y' = LabelledType y ylbl
                                                            -- TODO: need more accurate way to decide the new confidential level
                                                            lbl = getNewTypeLabel xlbl ylbl
 
 pairType :: LabelledType -> LabelledType -> LabelledType
-pairType (LabelledType x xlbl) (LabelledType y ylbl) = lowConf (TPair x' y') lbl
+pairType (LabelledType x xlbl) (LabelledType y ylbl) = LabelledType (TPair x' y') lbl
                                                      where x' = LabelledType x xlbl
                                                            y' = LabelledType y ylbl
                                                            -- TODO: need more accurate way to decide the new confidential level
@@ -397,5 +408,6 @@ pairType (LabelledType x xlbl) (LabelledType y ylbl) = lowConf (TPair x' y') lbl
 
 -- |infer runs type inference analysis for an expression
 infer :: Expr -> Either String TypeScheme
-infer e = fmap (Type . fst) result
+infer e = fmap update result
           where result = evalInference (wAlg Map.empty e) newContext
+                update (t, _, _) = Type t

@@ -27,6 +27,7 @@ library
   exposed-modules:
       Analysis
       AST
+      Constraint
       Parser
       Type
       TypeInference

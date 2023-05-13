@@ -7,8 +7,9 @@ TODO:
 - Constraints solver
 
 notes:
-H <= L
-
+L <= L
+L <= H
+H <= H
 
 let div5 = fn x -> x / 5 -- div5 L -> L
 
