@@ -9,7 +9,9 @@ import Constraint
 import Type
 
 import Data.Map as Map (Map, empty, lookup, union, insert, singleton)
-import Data.Set as Set (Set, empty, insert, member, toList, union, map)
+import Data.Set as Set (Set, empty, insert, member, toList, union, map, singleton)
+import Data.Maybe (fromMaybe)
+
 import Control.Monad.State
 import Control.Monad.Except
 import Control.Monad.Trans.Except
@@ -27,22 +29,25 @@ getType env id = case Map.lookup id env of
                    Nothing -> Left $ "Identifier not found: " ++ id
                    Just t  -> Right t
 
-data Substitution = Substitution {typeMap :: Map TypeVar LabelledType, labelMap ::  Map AnnotationVar Label}
+data Substitution = Substitution {typeMap :: Map TypeVar LabelledType, annoMap ::  Map AnnotationVar AnnotationVar}
 
 emptySubs :: Substitution
 emptySubs = newSubs Map.empty Map.empty
 
-newSubs :: Map TypeVar LabelledType -> Map AnnotationVar Label -> Substitution
-newSubs typeMap labelMap = Substitution {typeMap, labelMap};
+newSubs :: Map TypeVar LabelledType -> Map AnnotationVar AnnotationVar -> Substitution
+newSubs typeMap annoMap = Substitution {typeMap, annoMap};
 
 -- substitute labelled type
 substitute :: Substitution -> LabelledType -> LabelledType
-substitute substMap (LabelledType t l) = substituteType substMap t l -- TODO: handle label?
+substitute s (LabelledType t l) = substituteType s t (substituteLabel s l)
+
+substituteAnno :: Substitution -> AnnotationVar -> AnnotationVar
+substituteAnno s a = fromMaybe a (Map.lookup a (annoMap s))
 
 substituteLabel :: Substitution -> Label -> Label
-substituteLabel _ lbl = lbl -- TODO: define?
+substituteLabel s (LabelVar a) = LabelVar $ substituteAnno s a
+substituteLabel _ l = l
 
--- TODO: substitute Label with labelMap lookup?
 substituteType :: Substitution -> Type -> Label -> LabelledType
 substituteType s (TVar v) lbl = case Map.lookup v (typeMap s) of
                                   Just t -> t
@@ -66,7 +71,7 @@ substituteTS substMap (Forall v ts) = Forall v (substituteTS substMap ts)
 substituteTS substMap (Type lt) = Type (substitute substMap lt)
 
 substituteConstr :: Substitution -> Constraint -> Constraint
-substituteConstr sub (Constraint l1 l2) = Constraint (substituteLabel sub l1) (substituteLabel sub l2)
+substituteConstr s = fmap (substituteAnno s)
 
 substituteConstrs :: Substitution -> Constraints -> Constraints
 substituteConstrs sub = Set.map (substituteConstr sub)
@@ -74,18 +79,18 @@ substituteConstrs sub = Set.map (substituteConstr sub)
 infixr 9 .+
 -- substMapNew should be obtained after substMapOld
 (.+) :: Substitution -> Substitution -> Substitution
-(.+) substMapNew substMapOld = Substitution {
-                                typeMap = typeMapUnion,
-                                labelMap = labelMapUnion
-                                }
-                               where
-                                  newLabelMap = labelMap substMapNew
-                                  oldLabelMap = labelMap substMapOld
-                                  labelMapUnion = newLabelMap `Map.union` fmap (substituteLabel substMapNew) oldLabelMap
-                                  substMapNew' = substMapNew {labelMap = labelMapUnion}
-                                  newTypeMap = typeMap substMapNew'
-                                  oldTypeMap = typeMap substMapOld
-                                  typeMapUnion = newTypeMap `Map.union` fmap (substitute substMapNew') oldTypeMap
+(.+) subNew subOld = Substitution {
+                        typeMap = typeMapUnion,
+                        annoMap = annoMapUnion
+                      }
+                      where
+                        newAnnoMap = annoMap subNew
+                        oldAnnoMap = annoMap subOld
+                        annoMapUnion = newAnnoMap `Map.union` fmap (substituteAnno subNew) oldAnnoMap
+                        subUpdated = subNew {annoMap = annoMapUnion}
+                        newTypeMap = typeMap subUpdated
+                        oldTypeMap = typeMap subOld
+                        typeMapUnion = newTypeMap `Map.union` fmap (substitute subUpdated) oldTypeMap
 
 data InferenceContext = InferenceContext { currentTypeVar :: Int, currentAnnVar :: Int }
 
@@ -115,7 +120,9 @@ freshAnnotationVar = do
                        return (AnnotationVar current)
 
 fresh :: InferenceState LabelledType
-fresh = (\v -> varType v L) <$> freshVar  -- TODO: need to decide the type label
+fresh = do
+          a <- freshVar
+          labelledAnno (TVar a) <$> freshAnnotationVar
 
 -- generalize function of W Algorithm
 generalize :: TypeEnvironment -> LabelledType -> InferenceState TypeScheme
@@ -165,20 +172,16 @@ replaceVarT rep (TVar vold)   = let replacement = Map.lookup vold rep in
                                     Just vnew -> TVar vnew
                                     Nothing   -> TVar vold
 
--- Intuitively, the new type label should euqal to the highest one
-getNewTypeLabel :: Label -> Label -> Label
-getNewTypeLabel H _ = H
-getNewTypeLabel _ H = H
-getNewTypeLabel (LabelVar (AnnotationVar x)) L = LabelVar (AnnotationVar x)
-getNewTypeLabel L (LabelVar (AnnotationVar y)) = LabelVar (AnnotationVar y)
-getNewTypeLabel (LabelVar (AnnotationVar x)) (LabelVar (AnnotationVar y)) = LabelVar (AnnotationVar (if x > y then x else y))
-
-getNewTypeLabel _ _ = L -- TODO: just for completing the pattern, remove this later
-
 -- unify (U) function of W Algorithm
 unify :: LabelledType -> LabelledType -> InferenceState Substitution
-unify (LabelledType t1 lbl1) (LabelledType t2 lbl2) = unifyType t1 t2 lbl -- TODO: handle other label and their unification
-                                                    where lbl = getNewTypeLabel lbl1 lbl2
+unify (LabelledType t1 lbl1) (LabelledType t2 lbl2) = do
+                                                        s1 <- unifyType t1 t2 lbl2
+                                                        let s2 = createLabelSubs lbl1 lbl2
+                                                        return (s2 .+ s1)
+
+createLabelSubs :: Label -> Label -> Substitution
+createLabelSubs (LabelVar a1) (LabelVar a2) = newSubs Map.empty (Map.singleton a1 a2)
+createLabelSubs _ _ = emptySubs
 
 unifyType :: Type -> Type -> Label -> InferenceState Substitution
 unifyType TNat       TNat         _ = return emptySubs
@@ -222,12 +225,18 @@ operatorType NotEquals = do
 
 -- W function of W Algorithm
 wAlg :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution, Constraints)
-wAlg _   (Nat _)  = return (lowConf TNat, emptySubs, emptyConstraints)
-wAlg _   (Bool _) = return (lowConf TBool, emptySubs, emptyConstraints)
+wAlg _   (Nat _)  = do
+                      b <- freshAnnotationVar
+                      return (labelledAnno TNat b, emptySubs, Set.singleton (LowConf b))
+
+wAlg _   (Bool _) = do
+                      b <- freshAnnotationVar
+                      return (labelledAnno TBool b, emptySubs, Set.singleton (LowConf b))
+
 wAlg env (Var id) = do
                       ts <- except $ getType env id
                       ty <- instantiate ts
-                      return (ty, emptySubs, emptyConstraints)
+                      return (ty, emptySubs, emptyConstraints) -- TODO: subtype here? or in other places?
 
 wAlg env (Let x e1 e2)  = do
                             (t1, s1, c1) <- wAlg env e1
@@ -239,13 +248,13 @@ wAlg env (Let x e1 e2)  = do
 wAlg env (Fn x expr) = do
                           a <- fresh
                           (ty, s, c1) <- wAlg (Map.insert x (Type a) env) expr
-                          let tf = fnType (substitute s a) ty
+                          tf <- fnType (substitute s a) ty
                           return (tf, s, substituteConstrs s c1) -- TODO: correct constraint?
 
 wAlg env (Fun f x expr) = do
                             a1 <- fresh
                             a2 <- fresh
-                            let tf = fnType a1 a2
+                            tf <- fnType a1 a2
                             let env' = addTo env [(x, Type a1), (f, Type tf)]
 
                             (tret, s1, c1) <- wAlg env' expr
@@ -253,7 +262,7 @@ wAlg env (Fun f x expr) = do
 
                             let s = s2 .+ s1
                             let sub = substitute s
-                            let tfun = fnType (sub a1) (sub tret)
+                            tfun <- fnType (sub a1) (sub tret)
 
                             return (tfun, s, substituteConstrs s c1) -- TODO: correct constraint?
 
@@ -261,7 +270,7 @@ wAlg env (App e1 e2)    = do
                             (t1, s1, c1) <- wAlg env e1
                             (t2, s2, c2) <- wAlg (substituteEnv s1 env) e2
                             a <- fresh
-                            let tfun = fnType t2 a
+                            tfun <- fnType t2 a
                             s3 <- unify (substitute s2 t1) tfun
                             let s4 = s3 .+ s2 .+ s1
                             return (substitute s3 a, s4, emptyConstraints) -- TODO: constraints and subtype/effect?
@@ -307,12 +316,14 @@ wAlg env (Array el ev) = do
                            let s3 = s2 .+ s1
                            let env' = substituteEnv s3 env
                            (te, s4, c2) <- wAlg env' ev
-                           return (arrType te, s4 .+ s3, emptyConstraints) -- TODO: constraints?
+                           tarray <- arrType te
+                           return (tarray, s4 .+ s3, emptyConstraints) -- TODO: constraints?
 
 wAlg env (ArrayRead arr idx) = do
                                   (tarr, s1, c1) <- wAlg env arr
                                   te <- fresh
-                                  s2 <- unify tarr (arrType te)
+                                  tarray <- arrType te
+                                  s2 <- unify tarr tarray
                                   let s3 = s2 .+ s1
                                   let env' = substituteEnv s3 env
                                   (tidx, s4, c2) <- wAlg env' idx
@@ -324,7 +335,8 @@ wAlg env (ArrayRead arr idx) = do
 wAlg env (ArrayWrite arr idx el) = do
                                       (tarr, s1, c1) <- wAlg env arr
                                       te <- fresh
-                                      s2 <- unify tarr (arrType te)
+                                      tarray <- arrType te
+                                      s2 <- unify tarr tarray
                                       let s3 = s2 .+ s1
                                       let env1 = substituteEnv s3 env
                                       (tidx, s4, c2) <- wAlg env1 idx
@@ -340,14 +352,15 @@ wAlg env (ArrayWrite arr idx el) = do
 wAlg env (Pair e1 e2)   = do
                             (t1, s1, c1) <- wAlg env e1
                             (t2, s2, c2) <- wAlg (substituteEnv s1 env) e2
-                            let tp = pairType (substitute s2 t1) t2
+                            tp <- pairType (substitute s2 t1) t2
                             return (tp, s2 .+ s1, emptyConstraints) -- TODO: constraints?
 
 wAlg env (CasePair e1 x y e2) = do
                                   (tp, s1, c1) <- wAlg env e1
                                   vx <- fresh
                                   vy <- fresh
-                                  s2 <- unify tp (pairType vx vy)
+                                  tpair <- pairType vx vy
+                                  s2 <- unify tp tpair
                                   let tx = substitute s2 vx
                                   let ty = substitute s2 vy
                                   let s3 = s2 .+ s1
@@ -383,28 +396,17 @@ wAlg env (CaseList e1 e2 x1 x2 e3)   = do
 
 -- W Algorithm helper functions
 
-lowConf :: Type -> LabelledType
-lowConf t = LabelledType t L
+labelledAnno :: Type -> AnnotationVar -> LabelledType
+labelledAnno t b = LabelledType t (LabelVar b)
 
-varType :: TypeVar -> Label -> LabelledType
-varType v lbl = LabelledType (TVar v) lbl -- TODO: use annotationvar instead of L?
+arrType :: LabelledType -> InferenceState LabelledType
+arrType t = labelledAnno (TArray t) <$> freshAnnotationVar                 -- TODO: constraint between inner and outer label?
 
-arrType :: LabelledType -> LabelledType
-arrType t = LabelledType (TArray t) L -- TODO: use freshAnnotationVar
+fnType :: LabelledType -> LabelledType -> InferenceState LabelledType
+fnType x y = labelledAnno (TFun x y) <$> freshAnnotationVar                -- TODO: constraint between inner and outer label?
 
-fnType :: LabelledType -> LabelledType -> LabelledType
-fnType (LabelledType x xlbl) (LabelledType y ylbl) = LabelledType (TFun x' y') lbl
-                                                     where x' = LabelledType x xlbl
-                                                           y' = LabelledType y ylbl
-                                                           -- TODO: need more accurate way to decide the new confidential level
-                                                           lbl = getNewTypeLabel xlbl ylbl
-
-pairType :: LabelledType -> LabelledType -> LabelledType
-pairType (LabelledType x xlbl) (LabelledType y ylbl) = LabelledType (TPair x' y') lbl
-                                                     where x' = LabelledType x xlbl
-                                                           y' = LabelledType y ylbl
-                                                           -- TODO: need more accurate way to decide the new confidential level
-                                                           lbl = getNewTypeLabel xlbl ylbl
+pairType :: LabelledType -> LabelledType -> InferenceState LabelledType
+pairType x y = labelledAnno (TPair x y) <$> freshAnnotationVar             -- TODO: constraint between inner and outer label?
 
 -- |infer runs type inference analysis for an expression
 infer :: Expr -> Either String TypeScheme
