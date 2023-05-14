@@ -1,4 +1,5 @@
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE TupleSections #-}
 
 module TypeInference (
   infer
@@ -119,6 +120,9 @@ freshAnnotationVar = do
                        put ctx {currentAnnVar = current + 1}
                        return (AnnotationVar current)
 
+freshLabelVar :: InferenceState Label
+freshLabelVar = LabelVar <$> freshAnnotationVar
+
 fresh :: InferenceState LabelledType
 fresh = do
           a <- freshVar
@@ -207,21 +211,23 @@ unifyType t          (TVar a)     l = return $ newSubs (Map.singleton a (Labelle
 
 unifyType t1         t2           _ = throwE $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
 
-operatorType :: Operator -> InferenceState (Type, Type, Type)
-operatorType Add = return (TNat, TNat, TNat)
-operatorType Subtract = return (TNat, TNat, TNat)
-operatorType Multiply = return (TNat, TNat, TNat)
-operatorType Divide = return (TNat, TNat, TNat)
-operatorType LessThan = return (TNat, TNat, TBool)
-operatorType And = return (TBool, TBool, TBool)
-operatorType Or = return (TBool, TBool, TBool)
+operatorType :: Operator -> InferenceState (Type, Type, Type, Label)
+operatorType Add = (TNat, TNat, TNat, ) <$> freshLabelVar
+operatorType Subtract = (TNat, TNat, TNat, ) <$> freshLabelVar
+operatorType Multiply = (TNat, TNat, TNat, ) <$> freshLabelVar
+operatorType Divide = return (TNat, TNat, TNat, L)
+operatorType LessThan = (TNat, TNat, TBool, ) <$> freshLabelVar
+operatorType And = (TBool, TBool, TBool, ) <$> freshLabelVar
+operatorType Or = (TBool, TBool, TBool, ) <$> freshLabelVar
 operatorType Equals = do
                          t <- freshVar
-                         return (TVar t, TVar t, TBool)
+                         lb <- freshLabelVar
+                         return (TVar t, TVar t, TBool, lb)
 
 operatorType NotEquals = do
                          t <- freshVar
-                         return (TVar t, TVar t, TBool)
+                         lb <- freshLabelVar
+                         return (TVar t, TVar t, TBool, lb)
 
 addConstraintLbl :: Constraints -> Label -> Label -> Constraints
 addConstraintLbl c (LabelVar b1) (LabelVar b2) = Set.insert (LowerThan b1 b2) c
@@ -355,11 +361,22 @@ wAlg env (Operator op e1 e2) = do
                                  (t1, s1, c1) <- wAlg env e1
                                  let s1Env = substituteEnv s1 env
                                  (t2, s2, c2) <- wAlg s1Env e2
-                                 (opT1, opT2, opT) <- operatorType op
-                                 s3 <- unify (substitute s2 t1) (LabelledType opT1 L)  -- TODO: handling type label
-                                 s4 <- unify (substitute s3 t2) (substitute s3 (LabelledType opT2 L))  -- TODO: handling type label
-                                 return (LabelledType opT L, s4 .+ s3 .+ s2 .+ s1, emptyConstraints)  -- TODO: handling type label
-                                 -- TODO: constraints and subtype/effect?
+                                 (opT1, opT2, opT, lbl) <- operatorType op
+
+                                 let c3 = Set.union c2 (substituteConstrs s2 c1)
+
+                                 let opType1 = LabelledType opT1 lbl
+                                 let opType2 = LabelledType opT2 lbl
+                                 let opType = LabelledType opT lbl
+
+                                 (t1', c4) <- expandType (substitute s2 t1) c3
+                                 (t2', c5) <- expandType t2 c4
+
+                                 s3 <- unify t1' opType1
+                                 s4 <- unify t2' (substitute s3 opType2)
+                                 let s5 = s4 .+ s3 .+ s2 .+ s1
+
+                                 return (substitute s5 opType, s5, substituteConstrs s5 c5)
 
 wAlg env (TypeAnnotation e lt) = do
                                    (t, s1, c1) <- wAlg env e
