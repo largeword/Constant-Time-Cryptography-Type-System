@@ -337,7 +337,7 @@ wAlg env (App e1 e2)    = do
                             tfun <- fnType t2 a
                             s3 <- unify (substitute s2 t1) tfun
                             let s4 = s3 .+ s2 .+ s1
-                            return (substitute s3 a, s4, emptyConstraints) -- TODO: constraints and subtype/effect?
+                            return (substitute s3 a, s4, Set.union (substituteConstrs s3 c2) (substituteConstrs (s3 .+ s2) c1))
 
 wAlg env (IfThenElse e1 e2 e3) = do
                                   (t1, s1, c1) <- wAlg env e1
@@ -349,7 +349,7 @@ wAlg env (IfThenElse e1 e2 e3) = do
                                   s4 <- unify (substitute s3 (substitute s2 t1)) (LabelledType TBool L) -- TODO: label type?
                                   s5 <- unify (substitute s4 (substitute s3 t2)) (substitute s4 t3)
                                   let s6 = s5 .+ s4 .+ s3 .+ s2 .+ s1
-                                  return (substitute s6 t3, s6, emptyConstraints)  -- TODO: constraints and subtype/effect?
+                                  return (substitute s6 t3, s6, Set.union (substituteConstrs (s5 .+ s4) c3) (Set.union (substituteConstrs (s5 .+ s4 .+ s3) c2) (substituteConstrs (s5 .+ s4 .+ s3 .+ s2) c1)))
 
 wAlg env (Operator op e1 e2) = do
                                  (t1, s1, c1) <- wAlg env e1
