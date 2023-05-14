@@ -300,7 +300,7 @@ wAlg _   (Bool _) = do
 wAlg env (Var id) = do
                       ts <- except $ getType env id
                       ty <- instantiate ts
-                      return (ty, emptySubs, emptyConstraints) -- TODO: subtype here? or in other places?
+                      return (ty, emptySubs, emptyConstraints)
 
 wAlg env (Let x e1 e2)  = do
                             (t1, s1, c1) <- wAlg env e1
@@ -313,7 +313,7 @@ wAlg env (Fn x expr) = do
                           a <- fresh
                           (ty, s, c1) <- wAlg (Map.insert x (Type a) env) expr
                           tf <- fnType (substitute s a) ty
-                          return (tf, s, substituteConstrs s c1) -- TODO: correct constraint?
+                          return (tf, s, substituteConstrs s c1)
 
 wAlg env (Fun f x expr) = do
                             a1 <- fresh
@@ -328,7 +328,7 @@ wAlg env (Fun f x expr) = do
                             let sub = substitute s
                             tfun <- fnType (sub a1) (sub tret)
 
-                            return (tfun, s, substituteConstrs s c1) -- TODO: correct constraint?
+                            return (tfun, s, substituteConstrs s c1)
 
 wAlg env (App e1 e2)    = do
                             (t1, s1, c1) <- wAlg env e1
@@ -371,7 +371,7 @@ wAlg env (Sequence e1 e2) = do
                               (_, s1, c1) <- wAlg env e1
                               let env' = substituteEnv s1 env
                               (t, s2, c2) <- wAlg env' e2
-                              return (t, s2 .+ s1, emptyConstraints) -- TODO: constraints?
+                              return (t, s2 .+ s1, Set.union c2 (substituteConstrs s2 c1))
 
 -- Arrays
 wAlg env (Array el ev) = do
