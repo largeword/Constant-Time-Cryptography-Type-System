@@ -1,13 +1,13 @@
 cradle:
-  stack:
-    - path: "./src"
-      component: "ctc:lib"
+  cabal:
+    - path: "src"
+      component: "lib:ctc"
 
-    - path: "./app/Main.hs"
+    - path: "app/Main.hs"
       component: "ctc:exe:ctc-exe"
 
-    - path: "./app/Paths_ctc.hs"
+    - path: "app/Paths_ctc.hs"
       component: "ctc:exe:ctc-exe"
 
-    - path: "./test"
+    - path: "test"
       component: "ctc:test:ctc-test"
