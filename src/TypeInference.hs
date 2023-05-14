@@ -398,7 +398,7 @@ wAlg env (Array el ev) = do
                            let env' = substituteEnv s3 env
                            (te, s4, c2) <- wAlg env' ev
                            tarray <- arrType te
-                           return (tarray, s4 .+ s3, emptyConstraints) -- TODO: constraints?
+                           return (tarray, s4 .+ s3, Set.union c2 (substituteConstrs (s4 .+ s2) c1))
 
 wAlg env (ArrayRead arr idx) = do
                                   (tarr, s1, c1) <- wAlg env arr
@@ -408,9 +408,9 @@ wAlg env (ArrayRead arr idx) = do
                                   let s3 = s2 .+ s1
                                   let env' = substituteEnv s3 env
                                   (tidx, s4, c2) <- wAlg env' idx
-                                  s5 <- unify tidx (LabelledType TNat L) -- TODO: L??
+                                  s5 <- unify tidx (LabelledType TNat L)
                                   let s = s5 .+ s4 .+ s3
-                                  return (substitute s te, s, emptyConstraints) -- TODO: constraints?
+                                  return (substitute s te, s, Set.union (substituteConstrs s5 c2) (substituteConstrs (s5 .+ s4 .+ s2) c1))
 
 
 wAlg env (ArrayWrite arr idx el) = do
@@ -421,20 +421,22 @@ wAlg env (ArrayWrite arr idx el) = do
                                       let s3 = s2 .+ s1
                                       let env1 = substituteEnv s3 env
                                       (tidx, s4, c2) <- wAlg env1 idx
-                                      s5 <- unify tidx (LabelledType TNat L) -- TODO: L??
+                                      s5 <- unify tidx (LabelledType TNat L)
                                       let s6 = s5 .+ s4 .+ s3
                                       let env2 = substituteEnv s6 env1
                                       (telm, s7, c3) <- wAlg env2 el
                                       let s8 = s7 .+ s6
                                       s9 <- unify telm (substitute s8 te)
-                                      return (substitute s9 telm, s9 .+ s8, emptyConstraints) -- TODO: constraints?
+                                      return (substitute s9 telm, s9 .+ s8, Set.union (substituteConstrs s9 c3) 
+                                                                            (Set.union (substituteConstrs (s9 .+ s7 .+ s5) c2) 
+                                                                            (substituteConstrs (s9 .+ s7 .+ s5 .+ s4 .+ s2) c1)))
 
 -- Pairs
 wAlg env (Pair e1 e2)   = do
                             (t1, s1, c1) <- wAlg env e1
                             (t2, s2, c2) <- wAlg (substituteEnv s1 env) e2
                             tp <- pairType (substitute s2 t1) t2
-                            return (tp, s2 .+ s1, emptyConstraints) -- TODO: constraints?
+                            return (tp, s2 .+ s1, Set.union c2 (substituteConstrs s2 c1))
 
 wAlg env (CasePair e1 x y e2) = do
                                   (tp, s1, c1) <- wAlg env e1
@@ -447,7 +449,7 @@ wAlg env (CasePair e1 x y e2) = do
                                   let s3 = s2 .+ s1
                                   let env' = addTo (substituteEnv s3 env) [(x, Type tx), (y, Type ty)]
                                   (texp, s4, c2) <- wAlg env' e2
-                                  return (texp, s4 .+ s3, emptyConstraints) -- TODO: constraints?
+                                  return (texp, s4 .+ s3, Set.union c2 (substituteConstrs (s4 .+ s2) c1))
 
 wAlg _ Nil   = do
                    t <- fresh
@@ -457,7 +459,7 @@ wAlg env (Cons x xs)   = do
                            (tx, s1, c1) <- wAlg env x
                            (txs, s2, c2) <- wAlg (substituteEnv s1 env) xs
                            s3 <- unify txs (LabelledType (TList (substitute s2 tx)) L)
-                           return (substitute s3 txs, s3 .+ s2 .+ s1, emptyConstraints) -- TODO: constraints?
+                           return (substitute s3 txs, s3 .+ s2 .+ s1, Set.union (substituteConstrs s3 c2) (substituteConstrs (s3 .+ s2) c1))
 
 wAlg env (CaseList e1 e2 x1 x2 e3)   = do
                                          (t1, s1, c1) <- wAlg env e1
@@ -473,7 +475,9 @@ wAlg env (CaseList e1 e2 x1 x2 e3)   = do
                                          let env3 = addTo env2 [(x1, Type tx1), (x2, Type tx2)]
                                          (t3, s5, c3) <- wAlg env3 e3
                                          s6 <- unify (substitute (s5 .+ s4.+ s3) t2) t3
-                                         return (substitute s6 t3, s6 .+ s5 .+ s4 .+ s3 .+ s2 .+ s1, emptyConstraints) -- TODO: constraints?
+                                         return (substitute s6 t3, s6 .+ s5 .+ s4 .+ s3 .+ s2 .+ s1, Set.union (substituteConstrs s6 c3) 
+                                                                                                     (Set.union (substituteConstrs (s6 .+ s5 .+ s4 .+ s3) c2) 
+                                                                                                     (substituteConstrs (s6 .+ s5 .+ s4 .+ s3 .+ s2) c1)))
 
 -- W Algorithm helper functions
 
