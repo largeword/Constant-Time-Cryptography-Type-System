@@ -352,7 +352,7 @@ wAlg env (IfThenElse e1 e2 e3) = do
                                   let s2Env = substituteEnv s2 s1Env
                                   (t3, s3, c3) <- wAlg s2Env e3
                                   let s3Env = substituteEnv s3 s2Env
-                                  s4 <- unify (substitute s3 (substitute s2 t1)) (LabelledType TBool L) -- TODO: label type?
+                                  s4 <- unify (substitute s3 (substitute s2 t1)) (LabelledType TBool L)
                                   s5 <- unify (substitute s4 (substitute s3 t2)) (substitute s4 t3)
                                   let s6 = s5 .+ s4 .+ s3 .+ s2 .+ s1
                                   return (substitute s6 t3, s6, Set.union (substituteConstrs (s5 .+ s4) c3) (Set.union (substituteConstrs (s5 .+ s4 .+ s3) c2) (substituteConstrs (s5 .+ s4 .+ s3 .+ s2) c1)))
@@ -382,8 +382,7 @@ wAlg env (TypeAnnotation e lt) = do
                                    (t, s1, c1) <- wAlg env e
                                    (t', c1') <- expandType t c1
                                    s2 <- unify t' (substitute s1 lt)
-                                   return (substitute s2 t', s2 .+ s1, Set.union c1' c1) -- TODO: not fully working until label works
-                                   -- TODO: constraints and subtype/effect?
+                                   return (substitute s2 t', s2 .+ s1, substituteConstrs s2 c1')
 
 wAlg env (Sequence e1 e2) = do
                               (_, s1, c1) <- wAlg env e1
