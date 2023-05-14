@@ -18,6 +18,8 @@ parse s1 s2 = Parsec.parse (pExpr <* eof) s1 s2'
 addConfLabel :: Int -> String -> String
 addConfLabel n ('N':'a':'t':')':xs) = "Nat^b" ++ show n ++ ")" ++ addConfLabel (n+1) xs
 addConfLabel n ('B':'o':'o':'l':')':xs) = "Bool^b" ++ show n ++ ")" ++ addConfLabel (n+1) xs
+addConfLabel n ('N':'a':'t':',':xs) = "Nat^b" ++ show n ++ "," ++ addConfLabel (n+1) xs
+addConfLabel n ('B':'o':'o':'l':',':xs) = "Bool^b" ++ show n ++ "," ++ addConfLabel (n+1) xs
 addConfLabel _ [] = []
 addConfLabel n xs = head xs : addConfLabel n (tail xs)
 
