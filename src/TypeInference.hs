@@ -363,8 +363,9 @@ wAlg env (Operator op e1 e2) = do
 
 wAlg env (TypeAnnotation e lt) = do
                                    (t, s1, c1) <- wAlg env e
-                                   s2 <- unify t (substitute s1 lt)
-                                   return (substitute s2 t, s2 .+ s1, emptyConstraints) -- TODO: not fully working until label works
+                                   (t', c1') <- expandType t c1
+                                   s2 <- unify t' (substitute s1 lt)
+                                   return (substitute s2 t', s2 .+ s1, Set.union c1' c1) -- TODO: not fully working until label works
                                    -- TODO: constraints and subtype/effect?
 
 wAlg env (Sequence e1 e2) = do
