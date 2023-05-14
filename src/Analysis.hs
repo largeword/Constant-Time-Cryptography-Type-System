@@ -7,4 +7,4 @@ import Type
 import TypeInference
 
 analyse :: Expr -> Either String TypeScheme
-analyse = infer -- TODO: other analysis and transformations
+analyse e = fmap fst (infer e) -- TODO: other analysis and transformations

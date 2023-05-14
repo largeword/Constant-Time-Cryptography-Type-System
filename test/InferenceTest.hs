@@ -2,6 +2,7 @@ module InferenceTest (
   testInference
 ) where
 
+import Constraint (Constraints)
 import Type
 import Data.Map as Map (Map, lookup, insert, empty)
 
@@ -167,9 +168,9 @@ assertTypeError :: String -> String -> Assertion
 assertTypeError msg src = assertLeft msg src $ parseAndInfer src
 
 assertSrcType :: String -> Type -> Assertion
-assertSrcType src ty = assertType (assertRight "Type check failed" src $ parseAndInfer src) (simpleType ty)
+assertSrcType src ty = assertType (fst $ assertRight "Type check failed" src $ parseAndInfer src) (simpleType ty)
 
-parseAndInfer :: String -> Either String TypeScheme
+parseAndInfer :: String -> Either String (TypeScheme, Constraints)
 parseAndInfer src = infer $ assertRight "Parsing failed" src $ parse "" src
 
 lowercase :: [Char] -> [Char]

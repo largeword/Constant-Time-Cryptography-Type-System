@@ -490,7 +490,7 @@ pairType :: LabelledType -> LabelledType -> InferenceState LabelledType
 pairType x y = labelledAnno (TPair x y) <$> freshAnnotationVar             -- TODO: constraint between inner and outer label?
 
 -- |infer runs type inference analysis for an expression
-infer :: Expr -> Either String TypeScheme
+infer :: Expr -> Either String (TypeScheme, Constraints)
 infer e = fmap update result
           where result = evalInference (wAlg Map.empty e) newContext
-                update (t, _, _) = Type t
+                update (t, _, c) = (Type t, c)
