@@ -223,6 +223,70 @@ operatorType NotEquals = do
                          t <- freshVar
                          return (TVar t, TVar t, TBool)
 
+addConstraintLbl :: Constraints -> Label -> Label -> Constraints
+addConstraintLbl c (LabelVar b1) (LabelVar b2) = Set.insert (LowerThan b1 b2) c
+addConstraintLbl c (LabelVar b)  L             = Set.insert (LowConf b) c
+addConstraintLbl c H             (LabelVar b)  = Set.insert (HighConf b) c
+addConstraintLbl _ H             L             = error "Trying to constraint H <= L" -- TODO: can this happen?
+addConstraintLbl c _             _             = c
+
+type VariantTypeFunc = LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
+
+-- expandType t1 returns a t2 and constraint such that t1 <= t2 (covariant)
+expandType :: LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
+expandType (LabelledType t1 (LabelVar b1)) c = do
+                                                b2 <- freshAnnotationVar
+                                                (t2, c2) <- expandTypeT t1 c
+                                                let c3 = Set.insert (LowerThan b1 b2) c2
+                                                return (LabelledType t2 (LabelVar b2), c3)
+
+expandType (LabelledType t l) c = do
+                                    (t2, cts) <- expandTypeT t c
+                                    return (LabelledType t2 l, cts)
+
+-- narrowType t1 returns a t2 and constraint such that t2 <= t1 (contravariant)
+narrowType :: LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
+narrowType (LabelledType t1 (LabelVar b1)) c = do
+                                                b2 <- freshAnnotationVar
+                                                (t2, c2) <- narrowTypeT t1 c
+                                                let c3 = Set.insert (LowerThan b2 b1) c2
+                                                return (LabelledType t2 (LabelVar b2), c3)
+
+narrowType (LabelledType t l) c = do
+                                    (t2, cts) <- narrowTypeT t c
+                                    return (LabelledType t2 l, cts)
+
+expandTypeT :: Type -> Constraints-> InferenceState (Type, Constraints)
+expandTypeT = variantTypeT expandType narrowType
+
+narrowTypeT :: Type -> Constraints-> InferenceState (Type, Constraints)
+narrowTypeT = variantTypeT narrowType expandType
+
+variantTypeT :: VariantTypeFunc -> VariantTypeFunc -> Type -> Constraints -> InferenceState (Type, Constraints)
+variantTypeT _ _ TNat c = return (TNat, c)
+variantTypeT _ _ TBool c = return (TBool, c)
+
+variantTypeT _ _ (TVar a) c = return (TVar a, c)
+
+
+variantTypeT covar contra (TFun t1 t2) c = do
+                                            (t1', c1) <- contra t1 c
+                                            (t2', c2) <- covar t2 c1
+                                            return (TFun t1 t2', c2)
+
+variantTypeT covar contra (TPair t1 t2) c = do
+                                              (t1', c1) <- covar t1 c
+                                              (t2', c2) <- covar t2 c1
+                                              return (TPair t1 t2', c2) -- TODO: check if covar & contra use is right
+
+variantTypeT covar contra (TArray t) c = do
+                                          (t', c') <- covar t c
+                                          return (TArray t', c')     -- TODO: check if covar & contra use is right
+
+variantTypeT covar contra (TList t) c = do
+                                          (t', c') <- covar t c
+                                          return (TList t', c')     -- TODO: check if covar & contra use is right
+
 -- W function of W Algorithm
 wAlg :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution, Constraints)
 wAlg _   (Nat _)  = do
