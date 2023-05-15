@@ -93,7 +93,7 @@ infixr 9 .+
                         oldTypeMap = typeMap subOld
                         typeMapUnion = newTypeMap `Map.union` fmap (substitute subUpdated) oldTypeMap
 
-data InferenceContext = InferenceContext { currentTypeVar :: Int, currentAnnVar :: Int }
+data InferenceContext = InferenceContext { currentTypeVar :: Int, currentAnnVar :: Int, currentExpr :: Expr }
 
 type InferenceState = ExceptT String (State InferenceContext)
 
@@ -104,7 +104,12 @@ evalInference :: InferenceState a -> InferenceContext -> Either String a
 evalInference is ctx = fst (runInference is ctx)
 
 newContext :: InferenceContext
-newContext = InferenceContext {currentTypeVar = 0, currentAnnVar = 0}  -- why start with 0? Is it possible to be overlapped?
+newContext = InferenceContext {currentTypeVar = 0, currentAnnVar = 0, currentExpr = Nat 0} -- Nat 0 is just dummy expression
+
+ctcError :: String -> InferenceState a
+ctcError msg = do
+                   e <- getCurrentExpr
+                   throwE $ msg ++ " in expression: " ++ show e
 
 freshVar :: InferenceState TypeVar
 freshVar = do
@@ -127,6 +132,14 @@ fresh :: InferenceState LabelledType
 fresh = do
           a <- freshVar
           labelledAnno (TVar a) <$> freshAnnotationVar
+
+getCurrentExpr :: InferenceState Expr
+getCurrentExpr = gets currentExpr
+
+setCurrentExpr :: Expr -> InferenceState ()
+setCurrentExpr e = do
+                      ctx <- get
+                      put ctx {currentExpr = e}
 
 -- generalize function of W Algorithm
 generalize :: TypeEnvironment -> LabelledType -> InferenceState TypeScheme
@@ -209,7 +222,7 @@ unifyType (TArray t1) (TArray t2) _ = unify t1 t2
 unifyType (TVar a)   t            l = return $ newSubs (Map.singleton a (LabelledType t l)) Map.empty
 unifyType t          (TVar a)     l = return $ newSubs (Map.singleton a (LabelledType t l)) Map.empty
 
-unifyType t1         t2           _ = throwE $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
+unifyType t1         t2           _ = ctcError $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
 
 operatorType :: Operator -> InferenceState (LabelledType, LabelledType, LabelledType, Constraints)
 operatorType Add = createOpType TNat TNat TNat Nothing
@@ -218,7 +231,9 @@ operatorType Multiply = createOpType TNat TNat TNat Nothing
 operatorType LessThan = createOpType TNat TNat TBool Nothing
 operatorType And = createOpType TBool TBool TBool Nothing
 operatorType Or = createOpType TBool TBool TBool Nothing
-operatorType Divide = createOpType TNat TNat TNat (Just LowConf)
+operatorType Divide = do
+                        e <- getCurrentExpr
+                        createOpType TNat TNat TNat (Just (LowConf e))
 
 operatorType Equals = do
                          t <- TVar <$> freshVar
@@ -238,10 +253,16 @@ createOpType t1 t2 t3 cf = do
                             return (make t1, make t2, make t3, cs)
 
 addConstraintLbl :: Constraints -> Label -> Label -> InferenceState Constraints
-addConstraintLbl c (LabelVar b1) (LabelVar b2) = return $ Set.insert (LowerThan b1 b2) c
-addConstraintLbl c (LabelVar b)  L             = return $ Set.insert (LowConf b) c
-addConstraintLbl c H             (LabelVar b)  = return $ Set.insert (HighConf b) c
-addConstraintLbl _ H             L             = throwE "Trying to cast private value into public value"
+addConstraintLbl c (LabelVar b1) (LabelVar b2) = do
+                                                    e <- getCurrentExpr
+                                                    return $ Set.insert (LowerThan e b1 b2) c
+addConstraintLbl c (LabelVar b)  L             = do
+                                                    e <- getCurrentExpr
+                                                    return $ Set.insert (LowConf e b) c
+addConstraintLbl c H             (LabelVar b)  = do
+                                                    e <- getCurrentExpr
+                                                    return $ Set.insert (HighConf e b) c
+addConstraintLbl _ H             L             = ctcError "Trying to cast private value into public value"
 addConstraintLbl c _             _             = return c
 
 type VariantTypeFunc = LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
@@ -251,7 +272,8 @@ expandType :: LabelledType -> Constraints -> InferenceState (LabelledType, Const
 expandType (LabelledType t1 (LabelVar b1)) c = do
                                                 b2 <- freshAnnotationVar
                                                 (t2, c2) <- expandTypeT t1 c
-                                                let c3 = Set.insert (LowerThan b1 b2) c2
+                                                e <- getCurrentExpr
+                                                let c3 = Set.insert (LowerThan e b1 b2) c2
                                                 return (LabelledType t2 (LabelVar b2), c3)
 
 expandType (LabelledType t l) c = do
@@ -263,7 +285,8 @@ narrowType :: LabelledType -> Constraints -> InferenceState (LabelledType, Const
 narrowType (LabelledType t1 (LabelVar b1)) c = do
                                                 b2 <- freshAnnotationVar
                                                 (t2, c2) <- narrowTypeT t1 c
-                                                let c3 = Set.insert (LowerThan b2 b1) c2
+                                                e <- getCurrentExpr
+                                                let c3 = Set.insert (LowerThan e b2 b1) c2
                                                 return (LabelledType t2 (LabelVar b2), c3)
 
 narrowType (LabelledType t l) c = do
@@ -286,12 +309,12 @@ variantTypeT _ _ (TVar a) c = return (TVar a, c)
 variantTypeT covar contra (TFun t1 t2) c = do
                                             (t1', c1) <- contra t1 c
                                             (t2', c2) <- covar t2 c1
-                                            return (TFun t1 t2', c2)
+                                            return (TFun t1' t2', c2)
 
 variantTypeT covar contra (TPair t1 t2) c = do
                                               (t1', c1) <- covar t1 c
                                               (t2', c2) <- covar t2 c1
-                                              return (TPair t1 t2', c2) -- TODO: check if covar & contra use is right
+                                              return (TPair t1' t2', c2) -- TODO: check if covar & contra use is right
 
 variantTypeT covar contra (TArray t) c = do
                                           (t', c') <- covar t c
@@ -303,33 +326,41 @@ variantTypeT covar contra (TList t) c = do
 
 -- W function of W Algorithm
 wAlg :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution, Constraints)
-wAlg _   (Nat _)  = do
-                      b <- freshAnnotationVar
-                      return (labelledAnno TNat b, emptySubs, Set.singleton (LowConf b))
+wAlg t e = do
+             prevExpr <- getCurrentExpr
+             setCurrentExpr e
+             result <- runW t e
+             setCurrentExpr prevExpr
+             return result
 
-wAlg _   (Bool _) = do
+runW :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution, Constraints)
+runW _   e@(Nat _)  = do
                       b <- freshAnnotationVar
-                      return (labelledAnno TBool b, emptySubs, Set.singleton (LowConf b))
+                      return (labelledAnno TNat b, emptySubs, Set.singleton (LowConf e b))
 
-wAlg env (Var id) = do
+runW _   e@(Bool _) = do
+                      b <- freshAnnotationVar
+                      return (labelledAnno TBool b, emptySubs, Set.singleton (LowConf e b))
+
+runW env (Var id) = do
                       ts <- except $ getType env id
                       ty <- instantiate ts
                       return (ty, emptySubs, emptyConstraints)
 
-wAlg env (Let x e1 e2)  = do
+runW env (Let x e1 e2)  = do
                             (t1, s1, c1) <- wAlg env e1
                             let env' = substituteEnv s1 env
                             tx <- generalize env' t1
                             (t2, s2, c2) <- wAlg (Map.insert x tx env') e2
                             return (t2, s2 .+ s1, Set.union c2 (substituteConstrs s2 c1))
 
-wAlg env (Fn x expr) = do
+runW env (Fn x expr) = do
                           a <- fresh
                           (ty, s, c1) <- wAlg (Map.insert x (Type a) env) expr
                           tf <- fnType (substitute s a) ty
                           return (tf, s, substituteConstrs s c1)
 
-wAlg env (Fun f x expr) = do
+runW env (Fun f x expr) = do
                             a1 <- fresh
                             a2 <- fresh
                             tf <- fnType a1 a2
@@ -344,7 +375,7 @@ wAlg env (Fun f x expr) = do
 
                             return (tfun, s, substituteConstrs s c1)
 
-wAlg env (App e1 e2)    = do
+runW env (App e1 e2)    = do
                             (t1, s1, c1) <- wAlg env e1
                             (t2, s2, c2) <- wAlg (substituteEnv s1 env) e2
                             a <- fresh
@@ -353,7 +384,7 @@ wAlg env (App e1 e2)    = do
                             let s4 = s3 .+ s2 .+ s1
                             return (substitute s3 a, s4, Set.union (substituteConstrs s3 c2) (substituteConstrs (s3 .+ s2) c1))
 
-wAlg env (IfThenElse e1 e2 e3) = do
+runW env (IfThenElse e1 e2 e3) = do
                                   (t1, s1, c1) <- wAlg env e1
                                   let s1Env = substituteEnv s1 env
                                   (t2, s2, c2) <- wAlg s1Env e2
@@ -365,7 +396,7 @@ wAlg env (IfThenElse e1 e2 e3) = do
                                   let s6 = s5 .+ s4 .+ s3 .+ s2 .+ s1
                                   return (substitute s6 t3, s6, Set.union (substituteConstrs (s5 .+ s4) c3) (Set.union (substituteConstrs (s5 .+ s4 .+ s3) c2) (substituteConstrs (s5 .+ s4 .+ s3 .+ s2) c1)))
 
-wAlg env (Operator op e1 e2) = do
+runW env (Operator op e1 e2) = do
                                  (t1, s1, c1) <- wAlg env e1
                                  let s1Env = substituteEnv s1 env
                                  (t2, s2, c2) <- wAlg s1Env e2
@@ -382,7 +413,7 @@ wAlg env (Operator op e1 e2) = do
 
                                  return (substitute s5 opT, s5, substituteConstrs s5 c5)
 
-wAlg env (TypeAnnotation e lt) = do
+runW env (TypeAnnotation e lt) = do
                                    (t, s1, c1) <- wAlg env e
                                    (t', c1') <- expandType t c1
 
@@ -396,14 +427,14 @@ wAlg env (TypeAnnotation e lt) = do
                                  where castLabel c l H = addConstraintLbl c H l
                                        castLabel c l1 l2 = addConstraintLbl c l1 l2
 
-wAlg env (Sequence e1 e2) = do
+runW env (Sequence e1 e2) = do
                               (_, s1, c1) <- wAlg env e1
                               let env' = substituteEnv s1 env
                               (t, s2, c2) <- wAlg env' e2
                               return (t, s2 .+ s1, Set.union c2 (substituteConstrs s2 c1))
 
 -- Arrays
-wAlg env (Array el ev) = do
+runW env (Array el ev) = do
                            (tl, s1, c1) <- wAlg env el
                            s2 <- unify tl (LabelledType TNat L)
                            let s3 = s2 .+ s1
@@ -412,7 +443,7 @@ wAlg env (Array el ev) = do
                            tarray <- arrType te
                            return (tarray, s4 .+ s3, emptyConstraints) -- TODO: constraints?
 
-wAlg env (ArrayRead arr idx) = do
+runW env (ArrayRead arr idx) = do
                                   (tarr, s1, c1) <- wAlg env arr
                                   te <- fresh
                                   tarray <- arrType te
@@ -425,7 +456,7 @@ wAlg env (ArrayRead arr idx) = do
                                   return (substitute s te, s, emptyConstraints) -- TODO: constraints?
 
 
-wAlg env (ArrayWrite arr idx el) = do
+runW env (ArrayWrite arr idx el) = do
                                       (tarr, s1, c1) <- wAlg env arr
                                       te <- fresh
                                       tarray <- arrType te
@@ -442,13 +473,13 @@ wAlg env (ArrayWrite arr idx el) = do
                                       return (substitute s9 telm, s9 .+ s8, emptyConstraints) -- TODO: constraints?
 
 -- Pairs
-wAlg env (Pair e1 e2)   = do
+runW env (Pair e1 e2)   = do
                             (t1, s1, c1) <- wAlg env e1
                             (t2, s2, c2) <- wAlg (substituteEnv s1 env) e2
                             tp <- pairType (substitute s2 t1) t2
                             return (tp, s2 .+ s1, emptyConstraints) -- TODO: constraints?
 
-wAlg env (CasePair e1 x y e2) = do
+runW env (CasePair e1 x y e2) = do
                                   (tp, s1, c1) <- wAlg env e1
                                   vx <- fresh
                                   vy <- fresh
@@ -461,17 +492,17 @@ wAlg env (CasePair e1 x y e2) = do
                                   (texp, s4, c2) <- wAlg env' e2
                                   return (texp, s4 .+ s3, emptyConstraints) -- TODO: constraints?
 
-wAlg _ Nil   = do
+runW _ Nil   = do
                    t <- fresh
                    return (LabelledType (TList t) L, emptySubs, emptyConstraints) -- TODO: correct constraints? L or type annotate??
 
-wAlg env (Cons x xs)   = do
+runW env (Cons x xs)   = do
                            (tx, s1, c1) <- wAlg env x
                            (txs, s2, c2) <- wAlg (substituteEnv s1 env) xs
                            s3 <- unify txs (LabelledType (TList (substitute s2 tx)) L)
                            return (substitute s3 txs, s3 .+ s2 .+ s1, emptyConstraints) -- TODO: constraints?
 
-wAlg env (CaseList e1 e2 x1 x2 e3)   = do
+runW env (CaseList e1 e2 x1 x2 e3)   = do
                                          (t1, s1, c1) <- wAlg env e1
                                          let env1 = substituteEnv s1 env
                                          (t2, s2, c2) <- wAlg env1 e2

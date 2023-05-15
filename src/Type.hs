@@ -70,9 +70,10 @@ showsSubscript value = showString $ reverse (go value)
   where
     go :: Int -> String
     go x
-      | x < 0 = error "Negative value"
+      | x < 0 = minsign : go (-x)
       | r == 0 = subscript !! m : ""
       | otherwise = subscript !! m : go r
       where
         (r, m) = x `divMod` 10
     subscript = "₀₁₂₃₄₅₆₇₈₉"
+    minsign = '₋'
