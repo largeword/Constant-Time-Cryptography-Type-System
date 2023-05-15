@@ -1,10 +1,8 @@
 TODO:
-- Constraint datatype
-- W should return Constraint
-- Subtyping
-- Label rules for simple things: Nat, Bool
-- Label rules & CTC rule in if, arrays, etc, return error if violated
 - Constraints solver
+- constraints in array, list pair
+- Subtyping for case list, other parts??
+
 
 notes:
 L <= L
