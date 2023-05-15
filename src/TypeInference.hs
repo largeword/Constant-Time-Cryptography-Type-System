@@ -211,30 +211,38 @@ unifyType t          (TVar a)     l = return $ newSubs (Map.singleton a (Labelle
 
 unifyType t1         t2           _ = throwE $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
 
-operatorType :: Operator -> InferenceState (Type, Type, Type, Label)
-operatorType Add = (TNat, TNat, TNat, ) <$> freshLabelVar
-operatorType Subtract = (TNat, TNat, TNat, ) <$> freshLabelVar
-operatorType Multiply = (TNat, TNat, TNat, ) <$> freshLabelVar
-operatorType Divide = return (TNat, TNat, TNat, L)
-operatorType LessThan = (TNat, TNat, TBool, ) <$> freshLabelVar
-operatorType And = (TBool, TBool, TBool, ) <$> freshLabelVar
-operatorType Or = (TBool, TBool, TBool, ) <$> freshLabelVar
+operatorType :: Operator -> InferenceState (LabelledType, LabelledType, LabelledType, Constraints)
+operatorType Add = createOpType TNat TNat TNat Nothing
+operatorType Subtract = createOpType TNat TNat TNat Nothing
+operatorType Multiply = createOpType TNat TNat TNat Nothing
+operatorType LessThan = createOpType TNat TNat TBool Nothing
+operatorType And = createOpType TBool TBool TBool Nothing
+operatorType Or = createOpType TBool TBool TBool Nothing
+operatorType Divide = createOpType TNat TNat TNat (Just LowConf)
+
 operatorType Equals = do
-                         t <- freshVar
-                         lb <- freshLabelVar
-                         return (TVar t, TVar t, TBool, lb)
+                         t <- TVar <$> freshVar
+                         createOpType t t TBool Nothing
 
 operatorType NotEquals = do
-                         t <- freshVar
-                         lb <- freshLabelVar
-                         return (TVar t, TVar t, TBool, lb)
+                            t <- TVar <$> freshVar
+                            createOpType t t TBool Nothing
 
-addConstraintLbl :: Constraints -> Label -> Label -> Constraints
-addConstraintLbl c (LabelVar b1) (LabelVar b2) = Set.insert (LowerThan b1 b2) c
-addConstraintLbl c (LabelVar b)  L             = Set.insert (LowConf b) c
-addConstraintLbl c H             (LabelVar b)  = Set.insert (HighConf b) c
-addConstraintLbl _ H             L             = error "Trying to constraint H <= L" -- TODO: can this happen?
-addConstraintLbl c _             _             = c
+createOpType :: Type -> Type -> Type -> Maybe (AnnotationVar -> Constraint) -> InferenceState (LabelledType, LabelledType, LabelledType, Constraints)
+createOpType t1 t2 t3 cf = do
+                            b <- freshAnnotationVar
+                            let make t = LabelledType t (LabelVar b)
+                            let cs = case cf of
+                                      Nothing -> Set.empty
+                                      Just f -> Set.singleton (f b)
+                            return (make t1, make t2, make t3, cs)
+
+addConstraintLbl :: Constraints -> Label -> Label -> InferenceState Constraints
+addConstraintLbl c (LabelVar b1) (LabelVar b2) = return $ Set.insert (LowerThan b1 b2) c
+addConstraintLbl c (LabelVar b)  L             = return $ Set.insert (LowConf b) c
+addConstraintLbl c H             (LabelVar b)  = return $ Set.insert (HighConf b) c
+addConstraintLbl _ H             L             = throwE "Trying to cast private value into public value"
+addConstraintLbl c _             _             = return c
 
 type VariantTypeFunc = LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
 
@@ -361,28 +369,32 @@ wAlg env (Operator op e1 e2) = do
                                  (t1, s1, c1) <- wAlg env e1
                                  let s1Env = substituteEnv s1 env
                                  (t2, s2, c2) <- wAlg s1Env e2
-                                 (opT1, opT2, opT, lbl) <- operatorType op
+                                 (opT1, opT2, opT, c3) <- operatorType op
 
-                                 let c3 = Set.union c2 (substituteConstrs s2 c1)
+                                 let c3' = Set.union c3 $ Set.union c2 (substituteConstrs s2 c1)
 
-                                 let opType1 = LabelledType opT1 lbl
-                                 let opType2 = LabelledType opT2 lbl
-                                 let opType = LabelledType opT lbl
-
-                                 (t1', c4) <- expandType (substitute s2 t1) c3
+                                 (t1', c4) <- expandType (substitute s2 t1) c3'
                                  (t2', c5) <- expandType t2 c4
 
-                                 s3 <- unify t1' opType1
-                                 s4 <- unify t2' (substitute s3 opType2)
+                                 s3 <- unify t1' opT1
+                                 s4 <- unify t2' (substitute s3 opT2)
                                  let s5 = s4 .+ s3 .+ s2 .+ s1
 
-                                 return (substitute s5 opType, s5, substituteConstrs s5 c5)
+                                 return (substitute s5 opT, s5, substituteConstrs s5 c5)
 
 wAlg env (TypeAnnotation e lt) = do
                                    (t, s1, c1) <- wAlg env e
                                    (t', c1') <- expandType t c1
-                                   s2 <- unify t' (substitute s1 lt)
-                                   return (substitute s2 t', s2 .+ s1, substituteConstrs s2 c1')
+
+                                   let lt1 = substitute s1 lt
+                                   s2 <- unify t' lt1
+                                   let getlbl = substituteLabel s2 . getLabel
+
+                                   c2 <- castLabel (substituteConstrs s2 c1') (getlbl t') (getlbl lt1)
+
+                                   return (substitute s2 t', s2 .+ s1, c2)
+                                 where castLabel c l H = addConstraintLbl c H l
+                                       castLabel c l1 l2 = addConstraintLbl c l1 l2
 
 wAlg env (Sequence e1 e2) = do
                               (_, s1, c1) <- wAlg env e1
@@ -476,6 +488,9 @@ wAlg env (CaseList e1 e2 x1 x2 e3)   = do
                                          return (substitute s6 t3, s6 .+ s5 .+ s4 .+ s3 .+ s2 .+ s1, emptyConstraints) -- TODO: constraints?
 
 -- W Algorithm helper functions
+
+getLabel :: LabelledType -> Label
+getLabel (LabelledType _ l) = l
 
 labelledAnno :: Type -> AnnotationVar -> LabelledType
 labelledAnno t b = LabelledType t (LabelVar b)

@@ -21,9 +21,13 @@ type Constraints = Set Constraint
 -- constraint rules: L <= L, L <= H, H <= H
 data ConstraintT a = LowConf a | HighConf a | LowerThan a a
 
-deriving instance (Show a) => Show (ConstraintT a)
 deriving instance (Eq a) => Eq (ConstraintT a)
 deriving instance (Ord a) => Ord (ConstraintT a)
+
+instance (Show a) => Show (ConstraintT a) where
+  show (LowConf a) = show a ++ " ≤ L"
+  show (HighConf a) = "H ≤ " ++ show a
+  show (LowerThan a1 a2) = show a1 ++ " ≤ " ++ show a2
 
 instance Functor ConstraintT where
   fmap :: (a -> b) -> ConstraintT a -> ConstraintT b
