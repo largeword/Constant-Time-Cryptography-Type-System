@@ -168,7 +168,7 @@ assertTypeError :: String -> String -> Assertion
 assertTypeError msg src = assertLeft msg src $ parseAndInfer src
 
 assertSrcType :: String -> Type -> Assertion
-assertSrcType src ty = assertType (fst $ assertRight "Type check failed" src $ parseAndInfer src) (simpleType ty)
+assertSrcType src ty = assertType src (fst $ assertRight "Type check failed" src $ parseAndInfer src) (simpleType ty)
 
 parseAndInfer :: String -> Either String (TypeScheme, Constraints)
 parseAndInfer src = infer $ assertRight "Parsing failed" src $ parse "" src
@@ -186,9 +186,9 @@ assertRight :: Show a => String -> String -> Either a b -> b
 assertRight msg input (Left a)  = error (msg ++ ": " ++ show a ++ "\n  in test input: " ++ input)
 assertRight _   _     (Right b) = b
 
-assertType :: TypeScheme -> TypeScheme -> Assertion
-assertType (Forall _ t1) (Forall _ t2) = assertType t1 t2
-assertType (Type t1) (Type t2) =
+assertType :: String -> TypeScheme -> TypeScheme -> Assertion
+assertType src (Forall _ t1) (Forall _ t2) = assertType src t1 t2
+assertType src (Type t1) (Type t2) =
   do
     let reindex = reindexVar . unlabel
     let actual = reindex t1
@@ -196,9 +196,9 @@ assertType (Type t1) (Type t2) =
     if compareType actual expected then assertBool "" True
     else assertFailure $
           "Assertion fail: expected " ++ show expected ++
-          ", got " ++ show actual
+          ", got " ++ show actual ++ "\n  in test input: " ++ src
 
-assertType _ _ = assertFailure "Mismatch TypeScheme"
+assertType src _ _ = assertFailure $ "Mismatch TypeScheme\n  in test input: " ++ src
 
 -- reindexer for renumbering TVar
 

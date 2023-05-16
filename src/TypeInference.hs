@@ -1,5 +1,4 @@
 {-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE TupleSections #-}
 
 module TypeInference (
   infer
@@ -31,6 +30,7 @@ getType env id = case Map.lookup id env of
                    Just t  -> Right t
 
 data Substitution = Substitution {typeMap :: Map TypeVar LabelledType, annoMap ::  Map AnnotationVar AnnotationVar}
+                    deriving (Show)
 
 emptySubs :: Substitution
 emptySubs = newSubs Map.empty Map.empty
@@ -51,8 +51,9 @@ substituteLabel _ l = l
 
 substituteType :: Substitution -> Type -> Label -> LabelledType
 substituteType s (TVar v) lbl = case Map.lookup v (typeMap s) of
-                                  Just t -> t
+                                  Just t -> LabelledType (unlabel t) lbl
                                   Nothing -> LabelledType (TVar v) lbl
+                                where unlabel (LabelledType t _) = t
 
 substituteType s (TFun lt1 lt2)  lbl = LabelledType (TFun (substitute s lt1) (substitute s lt2)) lbl
 substituteType s (TPair lt1 lt2) lbl = LabelledType (TPair (substitute s lt1) (substitute s lt2)) lbl
@@ -109,7 +110,7 @@ newContext = InferenceContext {currentTypeVar = 0, currentAnnVar = 0, currentExp
 ctcError :: String -> InferenceState a
 ctcError msg = do
                    e <- getCurrentExpr
-                   throwE $ msg ++ " in expression: " ++ show e
+                   throwE $ msg ++ " in expression: " ++ showInline e
 
 freshVar :: InferenceState TypeVar
 freshVar = do
@@ -190,39 +191,44 @@ replaceVarT rep (TVar vold)   = let replacement = Map.lookup vold rep in
                                     Nothing   -> TVar vold
 
 -- unify (U) function of W Algorithm
+type UnificationFunc = LabelledType -> LabelledType -> InferenceState Substitution
+
 unify :: LabelledType -> LabelledType -> InferenceState Substitution
-unify (LabelledType t1 lbl1) (LabelledType t2 lbl2) = do
-                                                        s1 <- unifyType t1 t2 lbl2
-                                                        let s2 = createLabelSubs lbl1 lbl2
-                                                        return (s2 .+ s1)
+unify (LabelledType t1 lbl1) (LabelledType t2 _) = unifyType unify t1 t2 lbl1
+
+unifyWithLbl :: LabelledType -> LabelledType -> InferenceState Substitution
+unifyWithLbl (LabelledType t1 lbl1) (LabelledType t2 lbl2) = do
+                                                              s1 <- unifyType unifyWithLbl t1 t2 lbl2
+                                                              let s2 = createLabelSubs lbl1 lbl2
+                                                              return (s2 .+ s1)
 
 createLabelSubs :: Label -> Label -> Substitution
 createLabelSubs (LabelVar a1) (LabelVar a2) = newSubs Map.empty (Map.singleton a1 a2)
 createLabelSubs _ _ = emptySubs
 
-unifyType :: Type -> Type -> Label -> InferenceState Substitution
-unifyType TNat       TNat         _ = return emptySubs
-unifyType TBool      TBool        _ = return emptySubs
-unifyType (TFun x y) (TFun x' y') _ = do
-                                      s1 <- unify x x'
+unifyType :: UnificationFunc -> Type -> Type -> Label -> InferenceState Substitution
+unifyType _ TNat       TNat         _ = return emptySubs
+unifyType _ TBool      TBool        _ = return emptySubs
+unifyType uni (TFun x y) (TFun x' y') _ = do
+                                      s1 <- uni x x'
                                       let sub = substitute s1
-                                      s2 <- unify (sub y) (sub y')
+                                      s2 <- uni (sub y) (sub y')
                                       return (s2 .+ s1)
 
-unifyType (TPair x y) (TPair x' y') _ = do
-                                          s1 <- unify x x'
+unifyType uni (TPair x y) (TPair x' y') _ = do
+                                          s1 <- uni x x'
                                           let sub = substitute s1
-                                          s2 <- unify (sub y) (sub y')
+                                          s2 <- uni (sub y) (sub y')
                                           return (s2 .+ s1)
 
-unifyType (TList t1)  (TList t2)  _ = unify t1 t2
-unifyType (TArray t1) (TArray t2) _ = unify t1 t2
+unifyType uni (TList t1)  (TList t2)  _ = uni t1 t2
+unifyType uni (TArray t1) (TArray t2) _ = uni t1 t2
 
 -- it should be okay to not check whether a is in ftv(t) since there should be no free variable in t
-unifyType (TVar a)   t            l = return $ newSubs (Map.singleton a (LabelledType t l)) Map.empty
-unifyType t          (TVar a)     l = return $ newSubs (Map.singleton a (LabelledType t l)) Map.empty
+unifyType _ (TVar a)   t            l = return $ newSubs (Map.singleton a (LabelledType t l)) Map.empty
+unifyType _ t          (TVar a)     l = return $ newSubs (Map.singleton a (LabelledType t l)) Map.empty
 
-unifyType t1         t2           _ = ctcError $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
+unifyType _ t1         t2           _ = ctcError $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
 
 operatorType :: Operator -> InferenceState (LabelledType, LabelledType, LabelledType, Constraints)
 operatorType Add = createOpType TNat TNat TNat Nothing
@@ -262,49 +268,62 @@ addConstraintLbl c (LabelVar b)  L             = do
 addConstraintLbl c H             (LabelVar b)  = do
                                                     e <- getCurrentExpr
                                                     return $ Set.insert (HighConf e b) c
-addConstraintLbl _ H             L             = ctcError "Trying to cast private value into public value"
+addConstraintLbl _ H             L             = ctcError "Trying to cast secret value into public value"
 addConstraintLbl c _             _             = return c
 
 type VariantTypeFunc = LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
 
 -- expandType t1 returns a t2 and constraint such that t1 <= t2 (covariant)
-expandType :: LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
-expandType (LabelledType t1 (LabelVar b1)) c = do
+expandType :: LabelledType -> Constraints -> InferenceState (LabelledType, Substitution, Constraints)
+expandType t c = do
+                   (t', c') <- expandTypeR t c
+                   s <- unify t t'
+                   return (substitute s t', s, substituteConstrs s c')
+
+expandTypeR :: LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
+expandTypeR (LabelledType t1 (LabelVar b1)) c = do
                                                 b2 <- freshAnnotationVar
                                                 (t2, c2) <- expandTypeT t1 c
                                                 e <- getCurrentExpr
                                                 let c3 = Set.insert (LowerThan e b1 b2) c2
                                                 return (LabelledType t2 (LabelVar b2), c3)
 
-expandType (LabelledType t l) c = do
+expandTypeR (LabelledType t l) c = do
                                     (t2, cts) <- expandTypeT t c
                                     return (LabelledType t2 l, cts)
 
 -- narrowType t1 returns a t2 and constraint such that t2 <= t1 (contravariant)
-narrowType :: LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
-narrowType (LabelledType t1 (LabelVar b1)) c = do
+narrowType :: LabelledType -> Constraints -> InferenceState (LabelledType, Substitution, Constraints)
+narrowType t c = do
+                   (t', c') <- narrowTypeR t c
+                   s <- unify t t'
+                   return (substitute s t', s, substituteConstrs s c')
+
+narrowTypeR :: LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
+narrowTypeR (LabelledType t1 (LabelVar b1)) c = do
                                                 b2 <- freshAnnotationVar
                                                 (t2, c2) <- narrowTypeT t1 c
                                                 e <- getCurrentExpr
                                                 let c3 = Set.insert (LowerThan e b2 b1) c2
                                                 return (LabelledType t2 (LabelVar b2), c3)
 
-narrowType (LabelledType t l) c = do
+narrowTypeR (LabelledType t l) c = do
                                     (t2, cts) <- narrowTypeT t c
                                     return (LabelledType t2 l, cts)
 
 expandTypeT :: Type -> Constraints-> InferenceState (Type, Constraints)
-expandTypeT = variantTypeT expandType narrowType
+expandTypeT = variantTypeT expandTypeR narrowTypeR
 
 narrowTypeT :: Type -> Constraints-> InferenceState (Type, Constraints)
-narrowTypeT = variantTypeT narrowType expandType
+narrowTypeT = variantTypeT narrowTypeR expandTypeR
 
 variantTypeT :: VariantTypeFunc -> VariantTypeFunc -> Type -> Constraints -> InferenceState (Type, Constraints)
 variantTypeT _ _ TNat c = return (TNat, c)
 variantTypeT _ _ TBool c = return (TBool, c)
 
-variantTypeT _ _ (TVar a) c = return (TVar a, c)
-
+variantTypeT _ _ (TVar _) c = do
+                                a <- freshVar
+                                return (TVar a, c)
 
 variantTypeT covar contra (TFun t1 t2) c = do
                                             (t1', c1) <- contra t1 c
@@ -324,6 +343,45 @@ variantTypeT covar contra (TList t) c = do
                                           (t', c') <- covar t c
                                           return (TList t', c')     -- TODO: check if covar & contra use is right
 
+
+relabelType :: LabelledType -> InferenceState (LabelledType, Constraints)
+relabelType (LabelledType t l) = do
+                                   (t', c) <- relabelTypeT t
+                                   (l', c') <- constraintByLabel c l
+                                   return (LabelledType t' l', c')
+
+constraintByLabel :: Constraints -> Label -> InferenceState (Label, Constraints)
+constraintByLabel c L = do
+                          b <- freshAnnotationVar
+                          e <- getCurrentExpr
+                          return (LabelVar b, Set.insert (LowConf e b) c)
+constraintByLabel c H = do
+                          b <- freshAnnotationVar
+                          e <- getCurrentExpr
+                          return (LabelVar b, Set.insert (HighConf e b) c)
+
+constraintByLabel c (LabelVar (AnnotationVar i)) = return (LabelVar (AnnotationVar (-i-1)), c) -- TODO: neg here or in parser?
+
+relabelTypeT :: Type -> InferenceState (Type, Constraints)
+relabelTypeT (TFun x y) = do
+                            (x', c1) <- relabelType x
+                            (y', c2) <- relabelType y
+                            return (TFun x' y', Set.union c1 c2)
+relabelTypeT (TPair x y) = do
+                            (x', c1) <- relabelType x
+                            (y', c2) <- relabelType y
+                            return (TPair x' y', Set.union c1 c2)
+relabelTypeT (TList t) = do
+                            (t', c) <- relabelType t
+                            return (TList t', c)
+relabelTypeT (TArray t) = do
+                            (t', c) <- relabelType t
+                            return (TArray t', c)
+
+relabelTypeT (TVar (TypeVar i)) = return (TVar (TypeVar (-i - 1)), emptyConstraints) -- TODO: neg here or in parser?
+
+relabelTypeT t = return (t, emptyConstraints)
+
 -- W function of W Algorithm
 wAlg :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution, Constraints)
 wAlg t e = do
@@ -334,18 +392,18 @@ wAlg t e = do
              return result
 
 runW :: TypeEnvironment -> Expr -> InferenceState (LabelledType, Substitution, Constraints)
-runW _   e@(Nat _)  = do
+runW _   (Nat _)  = do
                       b <- freshAnnotationVar
-                      return (labelledAnno TNat b, emptySubs, Set.singleton (LowConf e b))
+                      return (labelledAnno TNat b, emptySubs, emptyConstraints)
 
-runW _   e@(Bool _) = do
+runW _   (Bool _) = do
                       b <- freshAnnotationVar
-                      return (labelledAnno TBool b, emptySubs, Set.singleton (LowConf e b))
+                      return (labelledAnno TBool b, emptySubs, emptyConstraints)
 
 runW env (Var id) = do
                       ts <- except $ getType env id
                       ty <- instantiate ts
-                      return (ty, emptySubs, emptyConstraints)
+                      expandType ty emptyConstraints
 
 runW env (Let x e1 e2)  = do
                             (t1, s1, c1) <- wAlg env e1
@@ -357,23 +415,29 @@ runW env (Let x e1 e2)  = do
 runW env (Fn x expr) = do
                           a <- fresh
                           (ty, s, c1) <- wAlg (Map.insert x (Type a) env) expr
+
                           tf <- fnType (substitute s a) ty
-                          return (tf, s, substituteConstrs s c1)
+
+                          (tf', s1, c2) <- expandType tf (substituteConstrs s c1)
+                          return (tf', s1 .+ s, c2)
 
 runW env (Fun f x expr) = do
                             a1 <- fresh
                             a2 <- fresh
                             tf <- fnType a1 a2
-                            let env' = addTo env [(x, Type a1), (f, Type tf)]
+
+                            (tf', s0, c0) <- expandType tf emptyConstraints
+
+                            let env' = substituteEnv s0 $ addTo env [(x, Type a1), (f, Type tf')]
 
                             (tret, s1, c1) <- wAlg env' expr
-                            s2 <- unify tret (substitute s1 a2)
+                            let s1' = s1 .+ s0
 
-                            let s = s2 .+ s1
-                            let sub = substitute s
-                            tfun <- fnType (sub a1) (sub tret)
+                            s2 <- unifyWithLbl tret (substitute s1' a2)
 
-                            return (tfun, s, substituteConstrs s c1)
+                            let s = s2 .+ s1'
+
+                            return (substitute s tf, s, substituteConstrs s (Set.union c1 c0))
 
 runW env (App e1 e2)    = do
                             (t1, s1, c1) <- wAlg env e1
@@ -386,46 +450,55 @@ runW env (App e1 e2)    = do
 
 runW env (IfThenElse e1 e2 e3) = do
                                   (t1, s1, c1) <- wAlg env e1
+
                                   let s1Env = substituteEnv s1 env
                                   (t2, s2, c2) <- wAlg s1Env e2
+
                                   let s2Env = substituteEnv s2 s1Env
                                   (t3, s3, c3) <- wAlg s2Env e3
-                                  let s3Env = substituteEnv s3 s2Env
-                                  s4 <- unify (substitute s3 (substitute s2 t1)) (LabelledType TBool L)
-                                  s5 <- unify (substitute s4 (substitute s3 t2)) (substitute s4 t3)
-                                  let s6 = s5 .+ s4 .+ s3 .+ s2 .+ s1
-                                  return (substitute s6 t3, s6, Set.union (substituteConstrs (s5 .+ s4) c3) (Set.union (substituteConstrs (s5 .+ s4 .+ s3) c2) (substituteConstrs (s5 .+ s4 .+ s3 .+ s2) c1)))
+
+                                  let s3' = s3 .+ s2 .+ s1
+
+                                  lb <- freshLabelVar
+
+                                  s4 <- unifyWithLbl (substitute s3' t1) (LabelledType TBool lb)
+                                  let s4' = s4 .+ s3'
+
+                                  s5 <- unifyWithLbl (substitute s4' t2) (substitute s4' t3)
+                                  let s6 = s5 .+ s4'
+
+                                  let subcon = substituteConstrs s6
+
+                                  let c4 = subcon c3 `Set.union` subcon c2 `Set.union` subcon c1
+                                  c4' <- addConstraintLbl c4 (substituteLabel s6 lb) L
+
+                                  return (substitute s6 t3, s6, c4')
 
 runW env (Operator op e1 e2) = do
                                  (t1, s1, c1) <- wAlg env e1
                                  let s1Env = substituteEnv s1 env
                                  (t2, s2, c2) <- wAlg s1Env e2
+
                                  (opT1, opT2, opT, c3) <- operatorType op
 
                                  let c3' = Set.union c3 $ Set.union c2 (substituteConstrs s2 c1)
 
-                                 (t1', c4) <- expandType (substitute s2 t1) c3'
-                                 (t2', c5) <- expandType t2 c4
+                                 s3 <- unifyWithLbl (substitute s2 t1) (substitute s2 opT1)
+                                 let s3' = s3 .+ s2 .+ s1
 
-                                 s3 <- unify t1' opT1
-                                 s4 <- unify t2' (substitute s3 opT2)
-                                 let s5 = s4 .+ s3 .+ s2 .+ s1
+                                 s4 <- unifyWithLbl (substitute s3' t2) (substitute s3' opT2)
 
-                                 return (substitute s5 opT, s5, substituteConstrs s5 c5)
+                                 let s4' = s4 .+ s3'
+
+                                 return (substitute s4' opT, s4', substituteConstrs s4' c3')
 
 runW env (TypeAnnotation e lt) = do
-                                   (t, s1, c1) <- wAlg env e
-                                   (t', c1') <- expandType t c1
+                                   (t, s1, c) <- wAlg env e
+                                   (lt1, cann) <- relabelType lt
 
-                                   let lt1 = substitute s1 lt
-                                   s2 <- unify t' lt1
-                                   let getlbl = substituteLabel s2 . getLabel
-
-                                   c2 <- castLabel (substituteConstrs s2 c1') (getlbl t') (getlbl lt1)
-
-                                   return (substitute s2 t', s2 .+ s1, c2)
-                                 where castLabel c l H = addConstraintLbl c H l
-                                       castLabel c l1 l2 = addConstraintLbl c l1 l2
+                                   s2 <- unifyWithLbl t lt1
+                                   let s3 = s2 .+ s1
+                                   return (substitute s3 lt1, s3, substituteConstrs s3 $ Set.union cann c)
 
 runW env (Sequence e1 e2) = do
                               (_, s1, c1) <- wAlg env e1

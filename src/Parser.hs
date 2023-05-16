@@ -12,7 +12,7 @@ import Data.List (foldl')
 import Data.Char (digitToInt)
 
 parse :: String -> String -> Either ParseError Expr
-parse = Parsec.parse (pExpr <* eof)
+parse = Parsec.parse (pWhitespace *> pExpr <* eof)
 
 type Parser = Parsec String ()
 

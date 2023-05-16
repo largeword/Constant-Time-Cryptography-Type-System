@@ -66,14 +66,16 @@ instance Show AnnotationVar where
   showsPrec _ (AnnotationVar var) = showString "b" . showsSubscript var
 
 showsSubscript :: Int -> ShowS
-showsSubscript value = showString $ reverse (go value)
+showsSubscript value = showString $ conv value
   where
+    conv :: Int -> String
+    conv x
+      | x < 0 = '\'' : reverse (go (-x))
+      | otherwise = reverse (go x)
     go :: Int -> String
     go x
-      | x < 0 = minsign : go (-x)
       | r == 0 = subscript !! m : ""
       | otherwise = subscript !! m : go r
       where
         (r, m) = x `divMod` 10
     subscript = "₀₁₂₃₄₅₆₇₈₉"
-    minsign = '₋'

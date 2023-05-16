@@ -1,7 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 
 module AST (
-  Id, Expr(..), Operator(..)
+  Id, Expr(..), Operator(..), showInline
 ) where
 
 import Data.List (intercalate)
@@ -161,3 +161,6 @@ trivial = go 8
       Nil -> True
       Cons e1 e2 -> go (fuel - 1) e1 && go (fuel - 1) e2
       _ -> False
+
+showInline :: Expr -> String
+showInline = unwords . words . show
