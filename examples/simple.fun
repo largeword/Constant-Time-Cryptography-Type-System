@@ -15,4 +15,4 @@
 --let c = true :: Bool^H in
 --  if c then 1 else 2
 
- let id = fn x -> x in (id (3 :: Nat^H); id)
+let id = fn x -> x in (id (3 :: Nat^H); id)

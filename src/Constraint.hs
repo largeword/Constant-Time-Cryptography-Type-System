@@ -46,9 +46,13 @@ instance (Ord a) => Ord (ConstraintT i a) where
   compare :: ConstraintT i a -> ConstraintT i a -> Ordering
   compare (LowConf _ a1) (LowConf _ a2) = compare a1 a2
   compare (HighConf _ a1) (HighConf _ a2) = compare a1 a2
-  compare (LowerThan _ a1 b1) (LowerThan _ a2 b2) = case compare a1 a2 of
-                                                      EQ -> compare b1 b2
-                                                      t -> t
+  compare (LowerThan _ a1 b1) (LowerThan _ a2 b2)
+    | b1 == a2 = LT
+    | b2 == a1 = GT
+    | otherwise = case compare a1 a2 of
+                    EQ -> compare b1 b2
+                    t -> t
+
   compare c1 c2 = compare (ordinal c1) (ordinal c2)
 
 ordinal :: ConstraintT i a -> Int
@@ -76,7 +80,7 @@ type SolvingContext = ExceptT String (State (Map Label Label))
 
 solve :: TypeScheme -> Constraints -> Either String TypeScheme
 solve ts c = do
-                m <- runSolver c
+                m <- runBruteSolver c
                 return $ replaceLabels (trace (show m) m) ts
 
 replaceLabels :: Map Label Label -> TypeScheme -> TypeScheme
@@ -96,10 +100,77 @@ replaceLabelsT _ t = t
 replaceLbl :: Map Label Label -> Label -> Label
 replaceLbl m l = fromMaybe L $ Map.lookup l m
 
+runBruteSolver :: Constraints -> Either String (Map Label Label)
+runBruteSolver cs = evalState (runExceptT (bruteSolver cs)) Map.empty
+
+bruteSolver :: Constraints -> SolvingContext (Map Label Label)
+bruteSolver cons = do
+                     let csl = toList cons
+                     splitted <- initAndSplit csl
+                     fillUntilUnchanged splitted
+                     get
+
+fillUntilUnchanged :: [Constraint] -> SolvingContext ()
+fillUntilUnchanged cs = do
+                          (changed, cs') <- fillAndFilter cs
+                          if changed then
+                            fillUntilUnchanged cs'
+                          else
+                            return ()
+
+fillAndFilter :: [Constraint] -> SolvingContext (Bool, [Constraint])
+fillAndFilter cs = runDiff <$> foldM go (False, id) cs
+                    where
+                      runDiff (res, diff) = (res, diff [])
+                      go (ch, acc) c = do changed <- fill c
+                                          if changed then return (True, acc)
+                                          else return (ch, acc . (c:))
+
+-- initAndSplit calling order assumption: LowConf first, then HighConf, then LowerThan
+initAndSplit :: [Constraint] -> SolvingContext [Constraint]
+initAndSplit [] = return []
+initAndSplit ((LowConf _ l):cs) = do
+                                    m <- get
+                                    put $ Map.insert (LabelVar l) L m
+                                    initAndSplit cs
+initAndSplit ((HighConf i l):cs) = do
+                                    m <- get
+                                    let lbl = LabelVar l
+                                    if Map.lookup lbl m == Just L
+                                    then throwE $ "CTC secret value violated in " ++ showMetadata i
+                                    else put $ Map.insert lbl H m
+                                    initAndSplit cs
+initAndSplit cs = return cs
+
+fill :: Constraint -> SolvingContext Bool
+fill (LowerThan i a1 a2) = do
+                              m <- get
+                              let l1 = LabelVar a1
+                              let l2 = LabelVar a2
+                              let v1 = fromMaybe l1 $ Map.lookup l1 m
+                              let v2 = fromMaybe l2 $ Map.lookup l2 m
+                              (fill1, fill2, changed) <- makeFill i v1 v2
+                              if changed then
+                                let update1 = Map.insert l1 fill1
+                                    update2 = Map.insert l2 fill2 in
+
+                                put (update1 $ update2 m) >> return True
+                              else
+                                return False
+fill _ = return False
+
+makeFill :: Metadata -> Label -> Label -> SolvingContext (Label, Label, Bool)
+makeFill _ (LabelVar {}) L = return (L, L, True)
+makeFill _ H (LabelVar {}) = return (H, H, True)
+makeFill i H L = throwE $ "CTC secret value violation in " ++ showMetadata i
+makeFill _ l1 l2 = return (l1, l2, False)
+
+-------
+
 runSolver :: Constraints -> Either String (Map Label Label)
 runSolver cs = evalState (runExceptT (sortAndFill cs)) Map.empty
 
--- splitConstraint calling order assumption: LowConf first, then HighConf, then LowerThan
+-- initAndFilter calling order assumption: LowConf first, then HighConf, then LowerThan
 initAndFilter :: Constraint -> SolvingContext Bool
 initAndFilter (LowConf _ l) = do
                                   m <- get
@@ -130,7 +201,7 @@ sortAndFill cs = do
                  let csl = toList cs -- csl is sorted by LowConf < HighConf < LowerThan
                  lowerOnly <- filterM initAndFilter csl
                  let sorted = toposortConstraints lowerOnly
-                 traverse_ fillSCConstraint (trace (show sorted) sorted)
+                 traverse_ fillSCConstraint sorted
                  get
 
 fillSCConstraint :: SCC [Constraint] -> SolvingContext ()
