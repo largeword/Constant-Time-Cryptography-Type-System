@@ -5,7 +5,7 @@
 --let a = 1 in a :: Nat^H
 --fn a -> if true then a else false :: Bool^H
 --fn a -> if a then a :: Bool^H else false
-fn c -> fn a -> if c then a else false :: Bool^H
+--fn c -> fn a -> if c then a else false :: Bool^H
 --fn c -> fn a -> if c then a :: Bool^H else false
 
 --
@@ -15,4 +15,4 @@ fn c -> fn a -> if c then a else false :: Bool^H
 --let c = true :: Bool^H in
 --  if c then 1 else 2
 
--- let id = fn x -> x in id id id id
+ let id = fn x -> x in (id (3 :: Nat^H); id)

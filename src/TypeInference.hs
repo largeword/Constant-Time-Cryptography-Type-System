@@ -444,7 +444,7 @@ runW env (App e1 e2)    = do
                             (t2, s2, c2) <- wAlg (substituteEnv s1 env) e2
                             a <- fresh
                             tfun <- fnType t2 a
-                            s3 <- unify (substitute s2 t1) tfun
+                            s3 <- unifyWithLbl (substitute s2 t1) tfun
                             let s4 = s3 .+ s2 .+ s1
                             return (substitute s3 a, s4, Set.union (substituteConstrs s3 c2) (substituteConstrs (s3 .+ s2) c1))
 
