@@ -7,23 +7,20 @@ import Type
 import Text.Parsec hiding (parse)
 import qualified Text.Parsec as Parsec
 import Control.Monad
+import Control.Monad.State.Lazy (get, put)
 
 import Data.List (foldl')
 import Data.Char (digitToInt)
 
 parse :: String -> String -> Either ParseError Expr
-parse s1 s2 = Parsec.parse (pExpr <* eof) s1 s2'
-              where s2' = addConfLabel 0 s2
+parse = Parsec.parse (pExpr <* eof)
 
-addConfLabel :: Int -> String -> String
-addConfLabel n ('N':'a':'t':')':xs) = "Nat^b" ++ show n ++ ")" ++ addConfLabel (n+1) xs
-addConfLabel n ('B':'o':'o':'l':')':xs) = "Bool^b" ++ show n ++ ")" ++ addConfLabel (n+1) xs
-addConfLabel n ('N':'a':'t':',':xs) = "Nat^b" ++ show n ++ "," ++ addConfLabel (n+1) xs
-addConfLabel n ('B':'o':'o':'l':',':xs) = "Bool^b" ++ show n ++ "," ++ addConfLabel (n+1) xs
-addConfLabel _ [] = []
-addConfLabel n xs = head xs : addConfLabel n (tail xs)
+newtype CurrentAutoAnnVar = CurrentAutoAnnVar {currentAutoAnnVar :: Int}
 
-type Parser = Parsec String ()
+type Parser = Parsec String (State CurrentAutoAnnVar ())
+
+--newAutoAnnVar :: CurrentAutoAnnVar
+--newAutoAnnVar = CurrentAutoAnnVar {currentAutoAnnVar = 0}
 
 pWhitespace :: Parser ()
 pWhitespace = skipMany (void space <|> lineComment <|> blockComment)
@@ -159,6 +156,12 @@ pLabel
   = (H <$ char 'ᴴ' <?> "ᴴ")
   <|> (L <$ char 'ᴸ' <?> "ᴸ")
   <|> char '^' *> pSuperscript
+  <|> do
+        -- lastVar <- getState
+        lastVar' <- get
+        let v = currentAutoAnnVar lastVar'
+        modifyState (+1)
+        return (LabelVar (AnnotationVar (v + 1)))
   where
     pSuperscript
       = L <$ string "L" <|> H <$ string "H" <|> LabelVar <$> pAnnotationVar
