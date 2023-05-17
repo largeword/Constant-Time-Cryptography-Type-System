@@ -3,6 +3,23 @@ TODO:
 - constraints in array, list pair
 - Subtyping for case list, other parts??
 
+- Parsing Changes example
+
+1 :: Nat^b0
+fn x -> x :: (a0^L -> a0^L)^L
+
+a_i -> a_(-i-1)
+
+(1, 1, 1) :: (Nat^b0, Nat^b1, Nat)
+
+(Nat^b0, Nat^b1, Nat^b-1)^b-2
+
+start ParserState = -1
+ParserState = -3
+
+-i + state
+(Nat^b-3, Nat^b-4, Nat^b-1)^b-2
+
 
 notes:
 L <= L
