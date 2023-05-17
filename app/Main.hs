@@ -8,13 +8,17 @@ main :: IO ()
 main = do
   args <- getArgs
   case args of
-    [name] -> compileFile name
+    [name] -> compileFile name False
+    [name, v] -> compileFile name (isVerbose v)
     _ -> do
       putStrLn "Expected filename"
       putStrLn "Usage: stack run -- filename"
 
-compileFile :: String -> IO ()
-compileFile file = do
+isVerbose :: String -> Bool
+isVerbose v = v == "-v" || v == "--verbose"
+
+compileFile :: String -> Bool -> IO ()
+compileFile file verbose = do
   code <- readFile file
   case parse file code of
     Left err -> do
@@ -25,7 +29,20 @@ compileFile file = do
       print ast
       putStrLn ""
       putStrLn "Analysis output:"
-      let res = analyse ast
-      case res of
-        Left err2 -> putStrLn ("Error: " ++ err2)
-        Right tp -> print tp
+      if verbose then
+        handleErr (analyseVerbose ast) printVerbose
+      else
+        handleErr (analyse ast) print
+  where
+    handleErr res prfn = case res of
+      Left e -> putStrLn ("Error: " ++ e)
+      Right r -> prfn r
+    printVerbose (tp, c, lm, tpf) = do
+      putStrLn "Initial type inference:"
+      print tp
+      putStrLn "Constraints:"
+      print c
+      putStrLn "Label Mapping:"
+      print lm
+      putStrLn "Final analysis result:"
+      print tpf

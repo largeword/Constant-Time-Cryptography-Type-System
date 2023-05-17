@@ -327,7 +327,7 @@ variantTypeT covar contra (TFun t1 t2) c = do
 variantTypeT covar contra (TPair t1 t2) c = do
                                               (t1', c1) <- covar t1 c
                                               (t2', c2) <- covar t2 c1
-                                              return (TPair t1' t2', c2) -- TODO: check if covar & contra use is right
+                                              return (TPair t1' t2', c2)
 
 variantTypeT covar contra (TArray t) c = do
                                           (t', c') <- covar t c
