@@ -1,9 +1,14 @@
 TODO:
-- Constraints solver
+
+- substitution : typevar -> Type
+- handle application of (a^L -> a^L)^H is H
+
 - constraints in array, list pair
 - Subtyping for case list, other parts??
 
 - Parsing Changes example
+
+-- empty case: return (LabelVar (AnnotationVar ...))
 
 1 :: Nat^b0
 fn x -> x :: (a0^L -> a0^L)^L
