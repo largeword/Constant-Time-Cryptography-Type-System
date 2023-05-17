@@ -29,18 +29,18 @@ getType env id = case Map.lookup id env of
                    Nothing -> Left $ "Identifier not found: " ++ id
                    Just t  -> Right t
 
-data Substitution = Substitution {typeMap :: Map TypeVar LabelledType, annoMap ::  Map AnnotationVar AnnotationVar}
+data Substitution = Substitution {typeMap :: Map TypeVar Type, annoMap ::  Map AnnotationVar AnnotationVar}
                     deriving (Show)
 
 emptySubs :: Substitution
 emptySubs = newSubs Map.empty Map.empty
 
-newSubs :: Map TypeVar LabelledType -> Map AnnotationVar AnnotationVar -> Substitution
+newSubs :: Map TypeVar Type -> Map AnnotationVar AnnotationVar -> Substitution
 newSubs typeMap annoMap = Substitution {typeMap, annoMap};
 
 -- substitute labelled type
 substitute :: Substitution -> LabelledType -> LabelledType
-substitute s (LabelledType t l) = substituteType s t (substituteLabel s l)
+substitute s (LabelledType t l) = LabelledType (substituteType s t) (substituteLabel s l)
 
 substituteAnno :: Substitution -> AnnotationVar -> AnnotationVar
 substituteAnno s a = fromMaybe a (Map.lookup a (annoMap s))
@@ -49,18 +49,14 @@ substituteLabel :: Substitution -> Label -> Label
 substituteLabel s (LabelVar a) = LabelVar $ substituteAnno s a
 substituteLabel _ l = l
 
-substituteType :: Substitution -> Type -> Label -> LabelledType
-substituteType s (TVar v) lbl = case Map.lookup v (typeMap s) of
-                                  Just t -> LabelledType (unlabel t) lbl
-                                  Nothing -> LabelledType (TVar v) lbl
-                                where unlabel (LabelledType t _) = t
+substituteType :: Substitution -> Type -> Type
+substituteType s (TVar v) = fromMaybe (TVar v) (Map.lookup v (typeMap s))
+substituteType s (TFun lt1 lt2)  = TFun (substitute s lt1) (substitute s lt2)
+substituteType s (TPair lt1 lt2) = TPair (substitute s lt1) (substitute s lt2)
+substituteType s (TArray lt) = TArray (substitute s lt)
+substituteType s (TList lt)  = TList (substitute s lt)
 
-substituteType s (TFun lt1 lt2)  lbl = LabelledType (TFun (substitute s lt1) (substitute s lt2)) lbl
-substituteType s (TPair lt1 lt2) lbl = LabelledType (TPair (substitute s lt1) (substitute s lt2)) lbl
-substituteType s (TArray lt) lbl = LabelledType (TArray (substitute s lt)) lbl
-substituteType s (TList lt)  lbl = LabelledType (TList (substitute s lt)) lbl
-
-substituteType _ t lbl = LabelledType t lbl -- Nat and Bool
+substituteType _ t = t -- Nat and Bool
 
 -- substitute type stored in the env
 substituteEnv :: Substitution -> TypeEnvironment -> TypeEnvironment
@@ -92,7 +88,7 @@ infixr 9 .+
                         subUpdated = subNew {annoMap = annoMapUnion}
                         newTypeMap = typeMap subUpdated
                         oldTypeMap = typeMap subOld
-                        typeMapUnion = newTypeMap `Map.union` fmap (substitute subUpdated) oldTypeMap
+                        typeMapUnion = newTypeMap `Map.union` fmap (substituteType subUpdated) oldTypeMap
 
 data InferenceContext = InferenceContext { currentTypeVar :: Int, currentAnnVar :: Int, currentExpr :: Expr }
 
@@ -195,40 +191,40 @@ type UnificationFunc = LabelledType -> LabelledType -> InferenceState Substituti
 
 unify :: LabelledType -> LabelledType -> InferenceState Substitution
 unify (LabelledType t1 lbl1) (LabelledType t2 lbl2) = do
-                                                        s1 <- unifyType unify t1 t2 lbl2
+                                                        s1 <- unifyType unify t1 t2
                                                         let s2 = createLabelSubs lbl1 lbl2
                                                         return (s2 .+ s1)
 
 unifyWithoutLbl :: LabelledType -> LabelledType -> InferenceState Substitution
-unifyWithoutLbl (LabelledType t1 lbl1) (LabelledType t2 _) = unifyType unifyWithoutLbl t1 t2 lbl1
+unifyWithoutLbl (LabelledType t1 _) (LabelledType t2 _) = unifyType unifyWithoutLbl t1 t2
 
 createLabelSubs :: Label -> Label -> Substitution
 createLabelSubs (LabelVar a1) (LabelVar a2) = newSubs Map.empty (Map.singleton a1 a2)
 createLabelSubs _ _ = emptySubs
 
-unifyType :: UnificationFunc -> Type -> Type -> Label -> InferenceState Substitution
-unifyType _ TNat       TNat         _ = return emptySubs
-unifyType _ TBool      TBool        _ = return emptySubs
-unifyType uni (TFun x y) (TFun x' y') _ = do
+unifyType :: UnificationFunc -> Type -> Type -> InferenceState Substitution
+unifyType _ TNat       TNat         = return emptySubs
+unifyType _ TBool      TBool        = return emptySubs
+unifyType uni (TFun x y) (TFun x' y') = do
                                       s1 <- uni x x'
                                       let sub = substitute s1
                                       s2 <- uni (sub y) (sub y')
                                       return (s2 .+ s1)
 
-unifyType uni (TPair x y) (TPair x' y') _ = do
+unifyType uni (TPair x y) (TPair x' y') = do
                                           s1 <- uni x x'
                                           let sub = substitute s1
                                           s2 <- uni (sub y) (sub y')
                                           return (s2 .+ s1)
 
-unifyType uni (TList t1)  (TList t2)  _ = uni t1 t2
-unifyType uni (TArray t1) (TArray t2) _ = uni t1 t2
+unifyType uni (TList t1)  (TList t2)  = uni t1 t2
+unifyType uni (TArray t1) (TArray t2) = uni t1 t2
 
 -- it should be okay to not check whether a is in ftv(t) since there should be no free variable in t
-unifyType _ (TVar a)   t            l = return $ newSubs (Map.singleton a (LabelledType t l)) Map.empty
-unifyType _ t          (TVar a)     l = return $ newSubs (Map.singleton a (LabelledType t l)) Map.empty
+unifyType _ (TVar a)   t            = return $ newSubs (Map.singleton a t) Map.empty
+unifyType _ t          (TVar a)     = return $ newSubs (Map.singleton a t) Map.empty
 
-unifyType _ t1         t2           _ = ctcError $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
+unifyType _ t1         t2           = ctcError $ "Mismatched types " ++ show t1 ++ " and " ++ show t2
 
 operatorType :: Operator -> InferenceState (LabelledType, LabelledType, LabelledType, Constraints)
 operatorType Add = createOpType TNat TNat TNat Nothing
