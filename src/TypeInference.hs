@@ -437,7 +437,7 @@ runW env (App e1 e2)    = do
                             (t1, s1, c1) <- wAlg env e1
                             (t2, s2, c2) <- wAlg (substituteEnv s1 env) e2
                             a <- fresh
-                            tfun <- fnType t2 a
+                            tfun <- fnType t2 a -- TODO: tfun outer label must be L, otherwise CT violation
                             s3 <- unify (substitute s2 t1) tfun
                             let s4 = s3 .+ s2 .+ s1
                             return (substitute s3 a, s4, Set.union (substituteConstrs s3 c2) (substituteConstrs (s3 .+ s2) c1))
@@ -503,12 +503,12 @@ runW env (Sequence e1 e2) = do
 -- Arrays
 runW env (Array el ev) = do
                            (tl, s1, c1) <- wAlg env el
-                           s2 <- unify tl (LabelledType TNat L)
+                           s2 <- unify tl (LabelledType TNat L) -- TODO: L constraint, CT violation otherwise
                            let s3 = s2 .+ s1
                            let env' = substituteEnv s3 env
                            (te, s4, c2) <- wAlg env' ev
                            tarray <- arrType te
-                           return (tarray, s4 .+ s3, emptyConstraints) -- TODO: constraints?
+                           return (tarray, s4 .+ s3, emptyConstraints) -- TODO: constraints
 
 runW env (ArrayRead arr idx) = do
                                   (tarr, s1, c1) <- wAlg env arr
@@ -518,9 +518,11 @@ runW env (ArrayRead arr idx) = do
                                   let s3 = s2 .+ s1
                                   let env' = substituteEnv s3 env
                                   (tidx, s4, c2) <- wAlg env' idx
-                                  s5 <- unify tidx (LabelledType TNat L) -- TODO: L??
+                                  s5 <- unify tidx (LabelledType TNat L) -- TODO: L constraint, CT violation otherwise
+                                  -- TODO: label of te is >= outer label of array
+
                                   let s = s5 .+ s4 .+ s3
-                                  return (substitute s te, s, emptyConstraints) -- TODO: constraints?
+                                  return (substitute s te, s, emptyConstraints) -- TODO: constraints
 
 
 runW env (ArrayWrite arr idx el) = do
@@ -531,20 +533,23 @@ runW env (ArrayWrite arr idx el) = do
                                       let s3 = s2 .+ s1
                                       let env1 = substituteEnv s3 env
                                       (tidx, s4, c2) <- wAlg env1 idx
-                                      s5 <- unify tidx (LabelledType TNat L) -- TODO: L??
+                                      s5 <- unify tidx (LabelledType TNat L) -- TODO: L constraint, CT violation otherwise
                                       let s6 = s5 .+ s4 .+ s3
                                       let env2 = substituteEnv s6 env1
                                       (telm, s7, c3) <- wAlg env2 el
                                       let s8 = s7 .+ s6
                                       s9 <- unify telm (substitute s8 te)
-                                      return (substitute s9 telm, s9 .+ s8, emptyConstraints) -- TODO: constraints?
+                                      -- TODO: label telm <= label te
+
+                                      return (substitute s9 telm, s9 .+ s8, emptyConstraints) -- TODO: constraints
 
 -- Pairs
 runW env (Pair e1 e2)   = do
                             (t1, s1, c1) <- wAlg env e1
                             (t2, s2, c2) <- wAlg (substituteEnv s1 env) e2
                             tp <- pairType (substitute s2 t1) t2
-                            return (tp, s2 .+ s1, emptyConstraints) -- TODO: constraints?
+                            let s3 = s2 .+ s1
+                            return (tp, s3, substituteConstrs s3 (Set.union c2 c1))
 
 runW env (CasePair e1 x y e2) = do
                                   (tp, s1, c1) <- wAlg env e1
@@ -555,9 +560,30 @@ runW env (CasePair e1 x y e2) = do
                                   let tx = substitute s2 vx
                                   let ty = substitute s2 vy
                                   let s3 = s2 .+ s1
-                                  let env' = addTo (substituteEnv s3 env) [(x, Type tx), (y, Type ty)]
-                                  (texp, s4, c2) <- wAlg env' e2
-                                  return (texp, s4 .+ s3, emptyConstraints) -- TODO: constraints?
+
+                                  -- label of tx & ty is >= outer label of pair
+                                  -- example: case (x^L, y^L)^H -> x should be ^H
+
+                                  (txe, se1, c2) <- expandType tx (substituteConstrs s3 c1)
+                                  (tye, se2, c3) <- expandType ty c2
+
+                                  let s3' = se2 .+ se1 .+ s3
+
+                                  let tx' = substitute s3' txe
+                                  let ty' = substitute s3' tye
+                                  let tp' = substitute s3' tp
+
+                                  c4 <- addConstraintLbl c3 (getLabel tp') (getLabel tx')
+                                  c4' <- addConstraintLbl c4 (getLabel tp') (getLabel ty')
+
+                                  -- recurse to e2
+
+                                  let env' = addTo (substituteEnv s3' env) [(x, Type tx'), (y, Type ty')]
+                                  (texp, s4, c5) <- wAlg env' e2
+
+                                  let s5 = s4 .+ s3'
+
+                                  return (texp, s5, Set.union c5 (substituteConstrs s5 c4'))
 
 runW _ Nil   = do
                    t <- fresh
@@ -572,11 +598,12 @@ runW env (Cons x xs)   = do
 runW env (CaseList e1 e2 x1 x2 e3)   = do
                                          (t1, s1, c1) <- wAlg env e1
                                          let env1 = substituteEnv s1 env
+                                         -- TODO: t1 outer label must be L, otherwise CT violation
                                          (t2, s2, c2) <- wAlg env1 e2
                                          vx1 <- fresh
                                          vx2 <- fresh
-                                         s3 <- unify (substitute s2 t1) (LabelledType (TList vx1) L)
-                                         s4 <- unify (substitute s3 vx2) (LabelledType (TList vx1) L)
+                                         s3 <- unify (substitute s2 t1) (LabelledType (TList vx1) L) --TODO: L
+                                         s4 <- unify (substitute s3 vx2) (LabelledType (TList vx1) L) -- TODO: L
                                          let tx1 = substitute s4 (substitute s3 vx1)
                                          let tx2 = substitute s4 (substitute s3 vx2)
                                          let env2 = substituteEnv s2 env1
@@ -586,18 +613,20 @@ runW env (CaseList e1 e2 x1 x2 e3)   = do
                                          return (substitute s6 t3, s6 .+ s5 .+ s4 .+ s3 .+ s2 .+ s1, emptyConstraints) -- TODO: constraints?
 
 -- W Algorithm helper functions
+getLabel :: LabelledType -> Label
+getLabel (LabelledType _ l) = l
 
 labelledAnno :: Type -> AnnotationVar -> LabelledType
 labelledAnno t b = LabelledType t (LabelVar b)
 
 arrType :: LabelledType -> InferenceState LabelledType
-arrType t = labelledAnno (TArray t) <$> freshAnnotationVar                 -- TODO: constraint between inner and outer label?
+arrType t = labelledAnno (TArray t) <$> freshAnnotationVar
 
 fnType :: LabelledType -> LabelledType -> InferenceState LabelledType
-fnType x y = labelledAnno (TFun x y) <$> freshAnnotationVar                -- TODO: constraint between inner and outer label?
+fnType x y = labelledAnno (TFun x y) <$> freshAnnotationVar
 
 pairType :: LabelledType -> LabelledType -> InferenceState LabelledType
-pairType x y = labelledAnno (TPair x y) <$> freshAnnotationVar             -- TODO: constraint between inner and outer label?
+pairType x y = labelledAnno (TPair x y) <$> freshAnnotationVar
 
 -- |infer runs type inference analysis for an expression
 infer :: Expr -> Either String (TypeScheme, Constraints)
