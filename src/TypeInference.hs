@@ -75,20 +75,18 @@ substituteConstrs :: Substitution -> Constraints -> Constraints
 substituteConstrs sub = Set.map (substituteConstr sub)
 
 infixr 9 .+
--- substMapNew should be obtained after substMapOld
+-- subNew should be obtained after subOld
 (.+) :: Substitution -> Substitution -> Substitution
 (.+) subNew subOld = Substitution {
                         typeMap = typeMapUnion,
                         annoMap = annoMapUnion
                       }
                       where
-                        newAnnoMap = annoMap subNew
-                        oldAnnoMap = annoMap subOld
-                        annoMapUnion = newAnnoMap `Map.union` fmap (substituteAnno subNew) oldAnnoMap
-                        subUpdated = subNew {annoMap = annoMapUnion}
-                        newTypeMap = typeMap subUpdated
-                        oldTypeMap = typeMap subOld
-                        typeMapUnion = newTypeMap `Map.union` fmap (substituteType subUpdated) oldTypeMap
+                        unionSub :: Ord k => (Substitution -> a -> a) -> (Substitution -> Map k a) -> Map k a
+                        unionSub subsFunc field = field subNew `Map.union` fmap (subsFunc subNew) (field subOld)
+                        annoMapUnion = unionSub substituteAnno annoMap
+                        typeMapUnion = unionSub substituteType typeMap
+
 
 data InferenceContext = InferenceContext { currentTypeVar :: Int, currentAnnVar :: Int, currentExpr :: Expr }
 
@@ -206,16 +204,16 @@ unifyType :: UnificationFunc -> Type -> Type -> InferenceState Substitution
 unifyType _ TNat       TNat         = return emptySubs
 unifyType _ TBool      TBool        = return emptySubs
 unifyType uni (TFun x y) (TFun x' y') = do
-                                      s1 <- uni x x'
-                                      let sub = substitute s1
-                                      s2 <- uni (sub y) (sub y')
-                                      return (s2 .+ s1)
-
-unifyType uni (TPair x y) (TPair x' y') = do
                                           s1 <- uni x x'
                                           let sub = substitute s1
                                           s2 <- uni (sub y) (sub y')
                                           return (s2 .+ s1)
+
+unifyType uni (TPair x y) (TPair x' y') = do
+                                            s1 <- uni x x'
+                                            let sub = substitute s1
+                                            s2 <- uni (sub y) (sub y')
+                                            return (s2 .+ s1)
 
 unifyType uni (TList t1)  (TList t2)  = uni t1 t2
 unifyType uni (TArray t1) (TArray t2) = uni t1 t2
@@ -588,9 +586,6 @@ runW env (CaseList e1 e2 x1 x2 e3)   = do
                                          return (substitute s6 t3, s6 .+ s5 .+ s4 .+ s3 .+ s2 .+ s1, emptyConstraints) -- TODO: constraints?
 
 -- W Algorithm helper functions
-
-getLabel :: LabelledType -> Label
-getLabel (LabelledType _ l) = l
 
 labelledAnno :: Type -> AnnotationVar -> LabelledType
 labelledAnno t b = LabelledType t (LabelVar b)
