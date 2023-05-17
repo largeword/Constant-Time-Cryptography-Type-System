@@ -194,13 +194,13 @@ replaceVarT rep (TVar vold)   = let replacement = Map.lookup vold rep in
 type UnificationFunc = LabelledType -> LabelledType -> InferenceState Substitution
 
 unify :: LabelledType -> LabelledType -> InferenceState Substitution
-unify (LabelledType t1 lbl1) (LabelledType t2 _) = unifyType unify t1 t2 lbl1
+unify (LabelledType t1 lbl1) (LabelledType t2 lbl2) = do
+                                                        s1 <- unifyType unify t1 t2 lbl2
+                                                        let s2 = createLabelSubs lbl1 lbl2
+                                                        return (s2 .+ s1)
 
-unifyWithLbl :: LabelledType -> LabelledType -> InferenceState Substitution
-unifyWithLbl (LabelledType t1 lbl1) (LabelledType t2 lbl2) = do
-                                                              s1 <- unifyType unifyWithLbl t1 t2 lbl2
-                                                              let s2 = createLabelSubs lbl1 lbl2
-                                                              return (s2 .+ s1)
+unifyWithoutLbl :: LabelledType -> LabelledType -> InferenceState Substitution
+unifyWithoutLbl (LabelledType t1 lbl1) (LabelledType t2 _) = unifyType unifyWithoutLbl t1 t2 lbl1
 
 createLabelSubs :: Label -> Label -> Substitution
 createLabelSubs (LabelVar a1) (LabelVar a2) = newSubs Map.empty (Map.singleton a1 a2)
@@ -277,7 +277,7 @@ type VariantTypeFunc = LabelledType -> Constraints -> InferenceState (LabelledTy
 expandType :: LabelledType -> Constraints -> InferenceState (LabelledType, Substitution, Constraints)
 expandType t c = do
                    (t', c') <- expandTypeR t c
-                   s <- unify t t'
+                   s <- unifyWithoutLbl t t'
                    return (substitute s t', s, substituteConstrs s c')
 
 expandTypeR :: LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
@@ -296,7 +296,7 @@ expandTypeR (LabelledType t l) c = do
 narrowType :: LabelledType -> Constraints -> InferenceState (LabelledType, Substitution, Constraints)
 narrowType t c = do
                    (t', c') <- narrowTypeR t c
-                   s <- unify t t'
+                   s <- unifyWithoutLbl t t'
                    return (substitute s t', s, substituteConstrs s c')
 
 narrowTypeR :: LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
@@ -433,7 +433,7 @@ runW env (Fun f x expr) = do
                             (tret, s1, c1) <- wAlg env' expr
                             let s1' = s1 .+ s0
 
-                            s2 <- unifyWithLbl tret (substitute s1' a2)
+                            s2 <- unify tret (substitute s1' a2)
 
                             let s = s2 .+ s1'
 
@@ -444,7 +444,7 @@ runW env (App e1 e2)    = do
                             (t2, s2, c2) <- wAlg (substituteEnv s1 env) e2
                             a <- fresh
                             tfun <- fnType t2 a
-                            s3 <- unifyWithLbl (substitute s2 t1) tfun
+                            s3 <- unify (substitute s2 t1) tfun
                             let s4 = s3 .+ s2 .+ s1
                             return (substitute s3 a, s4, Set.union (substituteConstrs s3 c2) (substituteConstrs (s3 .+ s2) c1))
 
@@ -461,10 +461,10 @@ runW env (IfThenElse e1 e2 e3) = do
 
                                   lb <- freshLabelVar
 
-                                  s4 <- unifyWithLbl (substitute s3' t1) (LabelledType TBool lb)
+                                  s4 <- unify (substitute s3' t1) (LabelledType TBool lb)
                                   let s4' = s4 .+ s3'
 
-                                  s5 <- unifyWithLbl (substitute s4' t2) (substitute s4' t3)
+                                  s5 <- unify (substitute s4' t2) (substitute s4' t3)
                                   let s6 = s5 .+ s4'
 
                                   let subcon = substituteConstrs s6
@@ -483,10 +483,10 @@ runW env (Operator op e1 e2) = do
 
                                  let c3' = Set.union c3 $ Set.union c2 (substituteConstrs s2 c1)
 
-                                 s3 <- unifyWithLbl (substitute s2 t1) (substitute s2 opT1)
+                                 s3 <- unify (substitute s2 t1) (substitute s2 opT1)
                                  let s3' = s3 .+ s2 .+ s1
 
-                                 s4 <- unifyWithLbl (substitute s3' t2) (substitute s3' opT2)
+                                 s4 <- unify (substitute s3' t2) (substitute s3' opT2)
 
                                  let s4' = s4 .+ s3'
 
@@ -496,7 +496,7 @@ runW env (TypeAnnotation e lt) = do
                                    (t, s1, c) <- wAlg env e
                                    (lt1, cann) <- relabelType lt
 
-                                   s2 <- unifyWithLbl t lt1
+                                   s2 <- unify t lt1
                                    let s3 = s2 .+ s1
                                    return (substitute s3 lt1, s3, substituteConstrs s3 $ Set.union cann c)
 
