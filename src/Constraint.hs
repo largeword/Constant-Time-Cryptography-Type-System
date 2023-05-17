@@ -76,34 +76,35 @@ emptyConstraints = Set.empty
 
 type ConstraintGraph = ([Constraint], Label, [Label])
 
-type SolvingContext = ExceptT String (State (Map Label Label))
+type SolvingContext = ExceptT String (State (Map AnnotationVar Label))
 
 solve :: TypeScheme -> Constraints -> Either String TypeScheme
 solve ts c = do
                 m <- runBruteSolver c
                 return $ replaceLabels (trace (show m) m) ts
 
-replaceLabels :: Map Label Label -> TypeScheme -> TypeScheme
+replaceLabels :: Map AnnotationVar Label -> TypeScheme -> TypeScheme
 replaceLabels m (Forall a ts) = Forall a $ replaceLabels m ts
 replaceLabels m (Type lt) = Type $ replaceLabelsLT m lt
 
-replaceLabelsLT :: Map Label Label -> LabelledType -> LabelledType
+replaceLabelsLT :: Map AnnotationVar Label -> LabelledType -> LabelledType
 replaceLabelsLT m (LabelledType t l) = LabelledType (replaceLabelsT m t) (replaceLbl m l)
 
-replaceLabelsT :: Map Label Label -> Type -> Type
+replaceLabelsT :: Map AnnotationVar Label -> Type -> Type
 replaceLabelsT m (TFun t1 t2)  = TFun (replaceLabelsLT m t1) (replaceLabelsLT m t2)
 replaceLabelsT m (TPair t1 t2) = TPair (replaceLabelsLT m t1) (replaceLabelsLT m t2)
 replaceLabelsT m (TArray t)    = TArray (replaceLabelsLT m t)
 replaceLabelsT m (TList t)     = TList (replaceLabelsLT m t)
 replaceLabelsT _ t = t
 
-replaceLbl :: Map Label Label -> Label -> Label
-replaceLbl m l = fromMaybe L $ Map.lookup l m
+replaceLbl :: Map AnnotationVar Label -> Label -> Label
+replaceLbl m (LabelVar a) = fromMaybe L $ Map.lookup a m
+replaceLbl _ l = l
 
-runBruteSolver :: Constraints -> Either String (Map Label Label)
+runBruteSolver :: Constraints -> Either String (Map AnnotationVar Label)
 runBruteSolver cs = evalState (runExceptT (bruteSolver cs)) Map.empty
 
-bruteSolver :: Constraints -> SolvingContext (Map Label Label)
+bruteSolver :: Constraints -> SolvingContext (Map AnnotationVar Label)
 bruteSolver cons = do
                      let csl = toList cons
                      splitted <- initAndSplit csl
@@ -117,6 +118,7 @@ fillUntilUnchanged cs = do
                             fillUntilUnchanged cs'
                           else
                             return ()
+                        -- where fills = foldM (\a c -> (|| a) <$> fill c) False cs
 
 fillAndFilter :: [Constraint] -> SolvingContext (Bool, [Constraint])
 fillAndFilter cs = runDiff <$> foldM go (False, id) cs
@@ -129,16 +131,15 @@ fillAndFilter cs = runDiff <$> foldM go (False, id) cs
 -- initAndSplit calling order assumption: LowConf first, then HighConf, then LowerThan
 initAndSplit :: [Constraint] -> SolvingContext [Constraint]
 initAndSplit [] = return []
-initAndSplit ((LowConf _ l):cs) = do
+initAndSplit ((LowConf _ a):cs) = do
                                     m <- get
-                                    put $ Map.insert (LabelVar l) L m
+                                    put $ Map.insert a L m
                                     initAndSplit cs
-initAndSplit ((HighConf i l):cs) = do
+initAndSplit ((HighConf i a):cs) = do
                                     m <- get
-                                    let lbl = LabelVar l
-                                    if Map.lookup lbl m == Just L
+                                    if Map.lookup a m == Just L
                                     then throwE $ "CTC secret value violated in " ++ showMetadata i
-                                    else put $ Map.insert lbl H m
+                                    else put $ Map.insert a H m
                                     initAndSplit cs
 initAndSplit cs = return cs
 
@@ -147,13 +148,12 @@ fill (LowerThan i a1 a2) = do
                               m <- get
                               let l1 = LabelVar a1
                               let l2 = LabelVar a2
-                              let v1 = fromMaybe l1 $ Map.lookup l1 m
-                              let v2 = fromMaybe l2 $ Map.lookup l2 m
+                              let v1 = fromMaybe l1 $ Map.lookup a1 m
+                              let v2 = fromMaybe l2 $ Map.lookup a2 m
                               (fill1, fill2, changed) <- makeFill i v1 v2
                               if changed then
-                                let update1 = Map.insert l1 fill1
-                                    update2 = Map.insert l2 fill2 in
-
+                                let update1 = Map.insert a1 fill1
+                                    update2 = Map.insert a2 fill2 in
                                 put (update1 $ update2 m) >> return True
                               else
                                 return False
@@ -167,21 +167,20 @@ makeFill _ l1 l2 = return (l1, l2, False)
 
 -------
 
-runSolver :: Constraints -> Either String (Map Label Label)
+runSolver :: Constraints -> Either String (Map AnnotationVar Label)
 runSolver cs = evalState (runExceptT (sortAndFill cs)) Map.empty
 
 -- initAndFilter calling order assumption: LowConf first, then HighConf, then LowerThan
 initAndFilter :: Constraint -> SolvingContext Bool
-initAndFilter (LowConf _ l) = do
+initAndFilter (LowConf _ a) = do
                                   m <- get
-                                  put $ Map.insert (LabelVar l) L m
+                                  put $ Map.insert a L m
                                   return False
-initAndFilter (HighConf i l) = do
+initAndFilter (HighConf i a) = do
                                   m <- get
-                                  let lbl = LabelVar l
-                                  if Map.lookup lbl m == Just L
+                                  if Map.lookup a m == Just L
                                   then throwE $ "CTC secret value violated in " ++ showMetadata i
-                                  else put $ Map.insert lbl H m
+                                  else put $ Map.insert a H m
                                   return False
 initAndFilter (LowerThan _ l1 l2) = do
                                     initVar l1
@@ -192,11 +191,11 @@ initVar :: AnnotationVar -> SolvingContext ()
 initVar k = do
               m <- get
               let l = LabelVar k
-              if Map.lookup l m == Nothing then
-                put $ Map.insert l l m
+              if Map.lookup k m == Nothing then
+                put $ Map.insert k l m
               else return ()
 
-sortAndFill :: Constraints -> SolvingContext (Map Label Label)
+sortAndFill :: Constraints -> SolvingContext (Map AnnotationVar Label)
 sortAndFill cs = do
                  let csl = toList cs -- csl is sorted by LowConf < HighConf < LowerThan
                  lowerOnly <- filterM initAndFilter csl
@@ -213,15 +212,15 @@ fillConstraint (LowerThan i a1 a2) = do
                                         m <- get
                                         let l1 = LabelVar a1
                                         let l2 = LabelVar a2
-                                        let v1 = fromMaybe l1 $ Map.lookup l1 m
-                                        let v2 = fromMaybe l2 $ Map.lookup l2 m
+                                        let v1 = fromMaybe l1 $ Map.lookup a1 m
+                                        let v2 = fromMaybe l2 $ Map.lookup a2 m
 
                                         let fill1 = if isLabelVar v1 then L else v1 -- default to L if empty
                                         let fill2 = if isLabelVar v2 then fill1 else v2 -- default to l1's value if empty
 
                                         validateFill i l1 l2 fill1 fill2
-                                        let update1 = Map.insert l1 fill1
-                                        let update2 = Map.insert l2 fill2
+                                        let update1 = Map.insert a1 fill1
+                                        let update2 = Map.insert a2 fill2
 
                                         put $ update1 $ update2 m
 fillConstraint _ = return ()
