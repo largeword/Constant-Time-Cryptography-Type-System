@@ -8,7 +8,9 @@ TODO:
 
 - Parsing Changes example
 
--- empty case: return (LabelVar (AnnotationVar ...))
+-- empty case:
+   <|> try (char '^' *> pSuperscript)
+   <|> return (LabelVar (AnnotationVar ...))
 
 1 :: Nat^b0
 fn x -> x :: (a0^L -> a0^L)^L
