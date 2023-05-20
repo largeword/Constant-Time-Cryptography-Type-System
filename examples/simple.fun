@@ -10,7 +10,7 @@
 
 --
 --let a = 1 in a :: Nat^H
-
+--let add = (fn x -> x + 1) :: (Nat^H -> Nat^H)^L in add (3 :: Nat^H)
 
 --let c = true :: Bool^H in
 --  if c then 1 else 2

@@ -4,16 +4,13 @@ module InferenceTest (
 
 import Constraint (Constraints)
 import Type
-import Data.Map as Map (Map, lookup, insert, empty)
 
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Control.Monad.State
 import TypeInference (infer)
 import Parser (parse)
-import Data.Char (toLower)
-import Data.List (isInfixOf)
+import TestUtils (reindexVar, assertRight, assertLeft)
 
 -- Type Inference Test
 
@@ -153,9 +150,6 @@ simpleType = Type . lowConf
 lowConf :: Type -> LabelledType
 lowConf t = LabelledType t L
 
-appLabel :: (Applicative m) => (Type -> m Type) -> LabelledType -> m LabelledType
-appLabel f (LabelledType t l) = LabelledType <$> f t <*> pure l
-
 unlabel :: LabelledType -> Type
 unlabel (LabelledType t _) = t
 
@@ -173,19 +167,6 @@ assertSrcType src ty = assertType src (fst $ assertRight "Type check failed" src
 parseAndInfer :: String -> Either String (TypeScheme, Constraints)
 parseAndInfer src = infer $ assertRight "Parsing failed" src $ parse "" src
 
-lowercase :: [Char] -> [Char]
-lowercase = map toLower
-
-assertLeft :: String -> String -> Either String b -> Assertion
-assertLeft msg input (Left e) = if lowercase msg `isInfixOf` lowercase e
-                                then assertBool "" True
-                                else error ("Assertion failed: Error must contain " ++ msg ++ ", where the error is " ++ e)
-assertLeft _ input (Right _) = error ("Assertion failed: Type check success when error is expected" ++ "\n  in test input: " ++ input)
-
-assertRight :: Show a => String -> String -> Either a b -> b
-assertRight msg input (Left a)  = error (msg ++ ": " ++ show a ++ "\n  in test input: " ++ input)
-assertRight _   _     (Right b) = b
-
 assertType :: String -> TypeScheme -> TypeScheme -> Assertion
 assertType src (Forall _ t1) (Forall _ t2) = assertType src t1 t2
 assertType src (Type t1) (Type t2) =
@@ -200,32 +181,6 @@ assertType src (Type t1) (Type t2) =
 
 assertType src _ _ = assertFailure $ "Mismatch TypeScheme\n  in test input: " ++ src
 
--- reindexer for renumbering TVar
-
-data Reindexer = Reindexer {current :: Int, mapping :: Map Int Int}
-
-reindexVar :: Type -> Type
-reindexVar t = evalState (reindexVarSt t) Reindexer {current = 0, mapping = Map.empty}
-
-reindexVarSt :: Type -> State Reindexer Type
-reindexVarSt TNat = return TNat
-reindexVarSt TBool = return TBool
-reindexVarSt (TFun t1 t2) = TFun <$> appLabel reindexVarSt t1 <*> appLabel reindexVarSt t2
-reindexVarSt (TPair t1 t2) = TPair <$> appLabel reindexVarSt t1 <*> appLabel reindexVarSt t2
-reindexVarSt (TList t) = TList <$> appLabel reindexVarSt t
-reindexVarSt (TArray t) = TArray <$> appLabel reindexVarSt t
-reindexVarSt (TVar (TypeVar x)) =
-  do
-    st <- get
-    case Map.lookup x (mapping st) of
-      Just v -> return $ tvar v
-      Nothing -> do
-        let id = current st
-        put Reindexer {
-            current = current st + 1,
-            mapping = Map.insert x id (mapping st)
-          }
-        return $ tvar id
 
 -- comparison
 
