@@ -14,7 +14,8 @@ import TestUtils (reindexVar, assertRight, assertLeft)
 
 testCT :: TestTree
 testCT = testGroup "Constant Time Test" [
-    testSimple
+    testSimple,
+    testPair
   ]
 
 testSimple :: TestTree
@@ -31,6 +32,19 @@ testSimple = testCase "Basic and If-Else" $ do
   assertCTViolation "if (true :: Bool^H) then 1 else 3"
   assertCTViolation "let div3 = fn x -> x / 3 in div3 (3 :: Nat^H)"
   assertCTViolation "let add = (fn x -> x + 1) :: (Nat^L -> Nat^L)^H in add 1"
+
+testPair :: TestTree
+testPair = testCase "Pair and Case Pair" $ do
+  assertCTCType "(1, 2) :: (Nat^H, Nat^L)^H" $ tpair (tnat H) (tnat L) H
+  assertCTCType "let f1 = fn x -> let f2 = fn y -> (x, y) in f2 in f1 (1 :: Nat^H)"
+    $ tfun (tvar 0 L) (tpair (tnat H) (tvar 0 L) L) L
+  assertCTCType "let getX = fn p -> let idH = (fn x -> x) :: (a0^H -> a0^H)^L in case idH p of (x, y) -> x in getX"
+    $ tfun (tpair (tvar 0 L) (tvar 1 L) L) (tvar 0 H) L
+  assertCTCType "let p = (1, 2) :: a0^H in case p of (x, y) -> x+1" $ tnat H
+
+  -- error cases
+  assertCTViolation "let p = (1, 2) :: a0^H in case p of (x, y) -> x/3"
+  assertCTViolation "let gx = (fn p -> case p of (x, y) -> x / 3) in gx ((1, 2) :: (Nat^H, Nat^H)^L)"
 
 assertCTCType :: String -> LabelledType -> Assertion
 assertCTCType src ty = assertType src (assertRight "Type check failed" src $ parseAndAnalyse src) (Type ty)
@@ -77,3 +91,6 @@ tfuns :: [LabelledType] -> Label -> LabelledType
 tfuns [x, y] l = tfun x y l
 tfuns (x:xs) l = tfun x (tfuns xs l) l
 tfuns _ _ = error "Invalid tfuns construction"
+
+tpair :: LabelledType -> LabelledType -> Label -> LabelledType
+tpair a b = LabelledType (TPair a b)

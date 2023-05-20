@@ -1,10 +1,7 @@
 TODO:
 
-- substitution : typevar -> Type
-- handle application of (a^L -> a^L)^H is H
-
-- constraints in array, list pair
-- Subtyping for case list, other parts??
+- constraints in array, list
+- Subtyping for array assignment
 
 - Parsing Changes example
 

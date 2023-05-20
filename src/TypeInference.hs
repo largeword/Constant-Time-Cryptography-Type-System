@@ -331,11 +331,11 @@ variantTypeT covar contra (TPair t1 t2) c = do
 
 variantTypeT covar contra (TArray t) c = do
                                           (t', c') <- covar t c
-                                          return (TArray t', c')     -- TODO: check if covar & contra use is right
+                                          return (TArray t', c')
 
 variantTypeT covar contra (TList t) c = do
                                           (t', c') <- covar t c
-                                          return (TList t', c')     -- TODO: check if covar & contra use is right
+                                          return (TList t', c')
 
 
 relabelType :: LabelledType -> InferenceState (LabelledType, Constraints)
