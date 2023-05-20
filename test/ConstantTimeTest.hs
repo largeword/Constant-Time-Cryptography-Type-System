@@ -25,10 +25,12 @@ testSimple = testCase "Basic and If-Else" $ do
   assertCTCType "fn c -> fn a -> if c then a :: Bool^H else false" $ tfuns [tbool L, tbool L, tbool H] L
   assertCTCType "fun f x -> if x < 1 then 0 :: Nat^H else 1 + f (x - 1)" $ tfun (tnat L) (tnat H) L
   assertCTCType "let div3 = fn x -> x / 3 in div3" $ tfun (tnat L) (tnat L) L
+  assertCTCType "let add = (fn x -> x + 1) :: (Nat^L -> Nat^L)^H in add" $ tfun (tnat L) (tnat L) H
 
   assertCTViolation "(3 :: Nat^H) / 1"
   assertCTViolation "if (true :: Bool^H) then 1 else 3"
   assertCTViolation "let div3 = fn x -> x / 3 in div3 (3 :: Nat^H)"
+  assertCTViolation "let add = (fn x -> x + 1) :: (Nat^L -> Nat^L)^H in add 1"
 
 assertCTCType :: String -> LabelledType -> Assertion
 assertCTCType src ty = assertType src (assertRight "Type check failed" src $ parseAndAnalyse src) (Type ty)

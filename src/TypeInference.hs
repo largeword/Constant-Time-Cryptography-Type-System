@@ -437,10 +437,15 @@ runW env (App e1 e2)    = do
                             (t1, s1, c1) <- wAlg env e1
                             (t2, s2, c2) <- wAlg (substituteEnv s1 env) e2
                             a <- fresh
-                            tfun <- fnType t2 a -- TODO: tfun outer label must be L, otherwise CT violation
+                            tfun <- fnType t2 a
                             s3 <- unify (substitute s2 t1) tfun
                             let s4 = s3 .+ s2 .+ s1
-                            return (substitute s3 a, s4, Set.union (substituteConstrs s3 c2) (substituteConstrs (s3 .+ s2) c1))
+                            let c3 = substituteConstrs s4 $ Set.union c2 c1
+
+                            -- tfun outer label must be L, otherwise CT violation
+                            c3' <- addConstraintLbl c3 (getLabel $ substitute s4 tfun) L
+
+                            return (substitute s4 a, s4, c3')
 
 runW env (IfThenElse e1 e2 e3) = do
                                   (t1, s1, c1) <- wAlg env e1
