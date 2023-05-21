@@ -16,7 +16,8 @@ testCT :: TestTree
 testCT = testGroup "Constant Time Test" [
     testSimple,
     testPair,
-    testList
+    testList,
+    testArray
   ]
 
 testSimple :: TestTree
@@ -46,6 +47,7 @@ testPair = testCase "Pair and Case Pair" $ do
   -- error cases
   assertCTViolation "let p = (1, 2) :: a0^H in case p of (x, y) -> x/3"
   assertCTViolation "let gx = (fn p -> case p of (x, y) -> x / 3) in gx ((1, 2) :: (Nat^H, Nat^H)^L)"
+  assertCTViolation "((1 :: Nat^H) : []) :: (List Nat^L)^L"
 
 testList :: TestTree
 testList = testCase "List and Case List" $ do
@@ -59,6 +61,18 @@ testList = testCase "List and Case List" $ do
   -- error cases
   assertCTViolation "let l = (1 : []) :: (List Nat^H)^H in case l of x : xs -> 1, [] -> 2"
   assertCTViolation "let sum = fun f l -> case l of x : xs -> x + f l, [] -> 0 in sum ([] :: a0^H)"
+
+testArray :: TestTree
+testArray = testCase "Array expressions" $ do
+  assertCTCType "array 0 (1 :: Nat^H)" $ tarray (tnat H) L
+  assertCTCType "let xs = (array 10 0 :: a0^H) in (xs, xs[0])" $ tpair (tarray (tnat L) H) (tnat H) L
+  assertCTCType "let xs = array 0 (1 :: Nat^H) in (xs, xs[0])" $ tpair (tarray (tnat H) L) (tnat H) L
+  assertCTCType "let xs = (array 10 0 :: a0^H) in xs[0] = xs[1]" $ tnat H
+
+  assertCTViolation "(array 0 (1 :: Nat^H)) :: (Array Nat^L)^L"
+  assertCTViolation "let len = 1 :: Nat^H in array len 0"
+  assertCTViolation "let xs = (array 10 0 :: a0^H) in xs[0] / 3"
+  assertCTViolation "(array 10 0 :: (Array Nat^L)^L)[0] = (1 :: Nat^H)"
 
 assertCTCType :: String -> LabelledType -> Assertion
 assertCTCType src ty = assertType src (assertRight "Type check failed" src $ parseAndAnalyse src) (Type ty)
@@ -111,3 +125,6 @@ tpair a b = LabelledType (TPair a b)
 
 tlist :: LabelledType -> Label -> LabelledType
 tlist t = LabelledType (TList t)
+
+tarray :: LabelledType -> Label -> LabelledType
+tarray t = LabelledType (TArray t)

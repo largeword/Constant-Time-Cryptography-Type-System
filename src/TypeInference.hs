@@ -508,12 +508,19 @@ runW env (Sequence e1 e2) = do
 -- Arrays
 runW env (Array el ev) = do
                            (tl, s1, c1) <- wAlg env el
-                           s2 <- unify tl (LabelledType TNat L) -- TODO: L constraint, CT violation otherwise
+                           lb <- freshLabelVar
+
+                           -- L constraint, CT violation otherwise
+                           c1' <- addConstraintLbl c1 lb L
+                           s2 <- unify tl (LabelledType TNat lb)
+
                            let s3 = s2 .+ s1
                            let env' = substituteEnv s3 env
                            (te, s4, c2) <- wAlg env' ev
                            tarray <- arrType te
-                           return (tarray, s4 .+ s3, emptyConstraints) -- TODO: constraints
+                           let s4' = s4 .+ s3
+
+                           return (tarray, s4', substituteConstrs s4' (Set.union c2 c1'))
 
 runW env (ArrayRead arr idx) = do
                                   (tarr, s1, c1) <- wAlg env arr
@@ -523,11 +530,28 @@ runW env (ArrayRead arr idx) = do
                                   let s3 = s2 .+ s1
                                   let env' = substituteEnv s3 env
                                   (tidx, s4, c2) <- wAlg env' idx
-                                  s5 <- unify tidx (LabelledType TNat L) -- TODO: L constraint, CT violation otherwise
-                                  -- TODO: label of te is >= outer label of array
 
-                                  let s = s5 .+ s4 .+ s3
-                                  return (substitute s te, s, emptyConstraints) -- TODO: constraints
+                                  -- L constraint, CT violation otherwise
+                                  lb <- freshLabelVar
+                                  c2' <- addConstraintLbl c2 lb L
+
+                                  s5 <- unify tidx (LabelledType TNat lb)
+                                  let s6 = s5 .+ s4 .+ s3
+                                  let c3 = substituteConstrs s6 $ Set.union c2' c1
+
+                                  (tres, s7, c3') <- expandType (substitute s6 te) c3
+                                  let s7' = s7 .+ s6
+
+                                  -- label of result is >= label of array and it's element
+
+                                  let lta = getLabel $ substitute s7' tarray
+                                  let lte = getLabel $ substitute s7' te
+                                  let ltr = getLabel tres
+
+                                  c4 <- addConstraintLbl c3' lta ltr
+                                  c4' <- addConstraintLbl c4 lte ltr
+
+                                  return (tres, s7', c4')
 
 
 runW env (ArrayWrite arr idx el) = do
@@ -538,15 +562,27 @@ runW env (ArrayWrite arr idx el) = do
                                       let s3 = s2 .+ s1
                                       let env1 = substituteEnv s3 env
                                       (tidx, s4, c2) <- wAlg env1 idx
-                                      s5 <- unify tidx (LabelledType TNat L) -- TODO: L constraint, CT violation otherwise
-                                      let s6 = s5 .+ s4 .+ s3
-                                      let env2 = substituteEnv s6 env1
-                                      (telm, s7, c3) <- wAlg env2 el
-                                      let s8 = s7 .+ s6
-                                      s9 <- unify telm (substitute s8 te)
-                                      -- TODO: label telm <= label te
 
-                                      return (substitute s9 telm, s9 .+ s8, emptyConstraints) -- TODO: constraints
+                                      -- L constraint, CT violation otherwise
+                                      lb <- freshLabelVar
+                                      c2' <- addConstraintLbl c2 lb L
+
+                                      s5 <- unify tidx (LabelledType TNat lb)
+                                      let s6 = s5 .+ s4 .+ s3
+
+                                      let c3 = substituteConstrs s6 (Set.union c2' c1)
+
+                                      -- telm <= te
+                                      let env2 = substituteEnv s6 env1
+                                      (telm, s7, c4) <- wAlg env2 el
+                                      (telm', s7', c4') <- expandType telm c4
+
+                                      let s8 = s7' .+ s7 .+ s6
+                                      s8' <- unify telm' (substitute s8 te)
+
+                                      let s9 = s8' .+ s8
+
+                                      return (substitute s9 telm, s9, substituteConstrs s9 $ Set.union c4' c3)
 
 -- Pairs
 runW env (Pair e1 e2)   = do
