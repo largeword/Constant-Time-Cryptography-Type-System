@@ -592,30 +592,46 @@ runW env (CasePair e1 x y e2) = do
 
 runW _ Nil   = do
                    t <- fresh
-                   return (LabelledType (TList t) L, emptySubs, emptyConstraints) -- TODO: correct constraints? L or type annotate??
+                   lt <- listType t
+                   return (lt, emptySubs, emptyConstraints)
 
 runW env (Cons x xs)   = do
                            (tx, s1, c1) <- wAlg env x
                            (txs, s2, c2) <- wAlg (substituteEnv s1 env) xs
-                           s3 <- unify txs (LabelledType (TList (substitute s2 tx)) L)
-                           return (substitute s3 txs, s3 .+ s2 .+ s1, emptyConstraints) -- TODO: constraints?
 
-runW env (CaseList e1 e2 x1 x2 e3)   = do
+                           lt <- listType (substitute s2 tx)
+                           s3 <- unify txs lt
+                           let s4 = s3 .+ s2 .+ s1
+
+                           return (substitute s4 lt, s4, substituteConstrs s4 (Set.union c2 c1))
+
+runW env (CaseList e1 e2 x xs e3)   = do
                                          (t1, s1, c1) <- wAlg env e1
                                          let env1 = substituteEnv s1 env
-                                         -- TODO: t1 outer label must be L, otherwise CT violation
                                          (t2, s2, c2) <- wAlg env1 e2
-                                         vx1 <- fresh
-                                         vx2 <- fresh
-                                         s3 <- unify (substitute s2 t1) (LabelledType (TList vx1) L) --TODO: L
-                                         s4 <- unify (substitute s3 vx2) (LabelledType (TList vx1) L) -- TODO: L
-                                         let tx1 = substitute s4 (substitute s3 vx1)
-                                         let tx2 = substitute s4 (substitute s3 vx2)
-                                         let env2 = substituteEnv s2 env1
-                                         let env3 = addTo env2 [(x1, Type tx1), (x2, Type tx2)]
+
+                                         vx <- fresh
+                                         vxs <- fresh
+                                         tl <- listType vx
+                                         s3 <- unify (substitute s2 t1) tl
+                                         s4 <- unify (substitute s3 vxs) (substitute s3 tl)
+
+                                         let s4' = s4 .+ s3 .+ s2 .+ s1
+
+                                         -- t1 outer label must be L, otherwise CT violation
+                                         c2' <- addConstraintLbl (Set.union c2 c1) (substituteLabel s4' $ getLabel t1) L
+
+                                         let tx = substitute s4' vx
+                                         let txs = substitute s4' vxs
+                                         let env2 = substituteEnv s4' env1
+                                         let env3 = addTo env2 [(x, Type tx), (xs, Type txs)]
                                          (t3, s5, c3) <- wAlg env3 e3
-                                         s6 <- unify (substitute (s5 .+ s4.+ s3) t2) t3
-                                         return (substitute s6 t3, s6 .+ s5 .+ s4 .+ s3 .+ s2 .+ s1, emptyConstraints) -- TODO: constraints?
+                                         let s5' = s5 .+ s4'
+
+                                         s6 <- unify (substitute s5' t2) t3
+                                         let s6' = s6 .+ s5'
+
+                                         return (substitute s6' t3, s6', substituteConstrs s6' (Set.union c3 c2'))
 
 -- W Algorithm helper functions
 getLabel :: LabelledType -> Label
@@ -632,6 +648,9 @@ fnType x y = labelledAnno (TFun x y) <$> freshAnnotationVar
 
 pairType :: LabelledType -> LabelledType -> InferenceState LabelledType
 pairType x y = labelledAnno (TPair x y) <$> freshAnnotationVar
+
+listType :: LabelledType -> InferenceState LabelledType
+listType t = labelledAnno (TList t) <$> freshAnnotationVar
 
 -- |infer runs type inference analysis for an expression
 infer :: Expr -> Either String (TypeScheme, Constraints)

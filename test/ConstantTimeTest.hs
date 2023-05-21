@@ -15,7 +15,8 @@ import TestUtils (reindexVar, assertRight, assertLeft)
 testCT :: TestTree
 testCT = testGroup "Constant Time Test" [
     testSimple,
-    testPair
+    testPair,
+    testList
   ]
 
 testSimple :: TestTree
@@ -45,6 +46,19 @@ testPair = testCase "Pair and Case Pair" $ do
   -- error cases
   assertCTViolation "let p = (1, 2) :: a0^H in case p of (x, y) -> x/3"
   assertCTViolation "let gx = (fn p -> case p of (x, y) -> x / 3) in gx ((1, 2) :: (Nat^H, Nat^H)^L)"
+
+testList :: TestTree
+testList = testCase "List and Case List" $ do
+  assertCTCType "[]" $ tlist (tvar 0 L) L
+  assertCTCType "(1 : []) :: (List Nat^H)^H" $ tlist (tnat H) H
+  assertCTCType "let xs = (1 :: Nat^H) : 2 : [] in case xs of y : ys -> y, [] -> 1" $ tnat H
+  assertCTCType "fun f l -> case l of x : xs -> x + f l, [] -> 0 :: Nat^H" $ tfun (tlist (tnat L) L) (tnat H) L
+  assertCTCType "fun f n -> if n < 1 then [] :: a0^H else (1 :: Nat^H) : f (n - 1)" $ tfun (tnat L) (tlist (tnat H) H) L
+  assertCTCType "let sum = fun f l -> case l of x : xs -> x + f l, [] -> 0 :: Nat^H in sum ([])" $ tnat H
+
+  -- error cases
+  assertCTViolation "let l = (1 : []) :: (List Nat^H)^H in case l of x : xs -> 1, [] -> 2"
+  assertCTViolation "let sum = fun f l -> case l of x : xs -> x + f l, [] -> 0 in sum ([] :: a0^H)"
 
 assertCTCType :: String -> LabelledType -> Assertion
 assertCTCType src ty = assertType src (assertRight "Type check failed" src $ parseAndAnalyse src) (Type ty)
@@ -94,3 +108,6 @@ tfuns _ _ = error "Invalid tfuns construction"
 
 tpair :: LabelledType -> LabelledType -> Label -> LabelledType
 tpair a b = LabelledType (TPair a b)
+
+tlist :: LabelledType -> Label -> LabelledType
+tlist t = LabelledType (TList t)

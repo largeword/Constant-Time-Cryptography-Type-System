@@ -23,7 +23,7 @@ assertLeft msg input (Left e) = if lowercase msg `isInfixOf` lowercase e
                                   ++ "\n  in test input: " ++ input)
                                 where lowercase = map toLower
 assertLeft msg input (Right _) = error (
-                                  "Assertion failed: Test returns Right when error with message '" ++ msg ++ "'is expected"
+                                  "Assertion failed: Test returns Right when error with message '" ++ msg ++ "' is expected"
                                   ++ "\n  in test input: " ++ input)
 
 -- reindexer for renumbering TVar

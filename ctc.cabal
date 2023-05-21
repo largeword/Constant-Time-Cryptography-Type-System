@@ -66,6 +66,7 @@ test-suite ctc-test
   other-modules:
       ConstantTimeTest
       InferenceTest
+      TestUtils
       Paths_ctc
   hs-source-dirs:
       test
