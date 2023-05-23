@@ -12,9 +12,17 @@ import Data.List (foldl')
 import Data.Char (digitToInt)
 
 parse :: String -> String -> Either ParseError Expr
-parse = Parsec.parse (pWhitespace *> pExpr <* eof)
+parse = Parsec.runParser (pWhitespace *> pExpr <* eof) newAutoAnnVar
 
-type Parser = Parsec String ()
+newtype CurrentAutoAnnVar = CurrentAutoAnnVar {currentAutoAnnVar :: Int}
+
+type Parser = Parsec String CurrentAutoAnnVar
+
+newAutoAnnVar :: CurrentAutoAnnVar
+newAutoAnnVar = CurrentAutoAnnVar {currentAutoAnnVar = 0}
+
+updateAutoAnnVar :: (Int -> Int) -> CurrentAutoAnnVar -> CurrentAutoAnnVar
+updateAutoAnnVar f c = CurrentAutoAnnVar { currentAutoAnnVar = f . currentAutoAnnVar $ c}
 
 pWhitespace :: Parser ()
 pWhitespace = skipMany (void space <|> lineComment <|> blockComment)
@@ -150,6 +158,11 @@ pLabel
   = (H <$ char 'ᴴ' <?> "ᴴ")
   <|> (L <$ char 'ᴸ' <?> "ᴸ")
   <|> char '^' *> pSuperscript
+  <|> do
+        lastVar' <- getState
+        let v = currentAutoAnnVar lastVar'
+        modifyState $ updateAutoAnnVar (+1)
+        return (LabelVar (AnnotationVar (v + 1)))
   where
     pSuperscript
       = L <$ string "L" <|> H <$ string "H" <|> LabelVar <$> pAnnotationVar
