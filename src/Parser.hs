@@ -10,19 +10,26 @@ import Control.Monad
 
 import Data.List (foldl')
 import Data.Char (digitToInt)
+import Data.Map as Map (Map, lookup, insert, empty)
 
 parse :: String -> String -> Either ParseError Expr
 parse = Parsec.runParser (pWhitespace *> pExpr <* eof) newAutoAnnVar
 
-newtype CurrentAutoAnnVar = CurrentAutoAnnVar {currentAutoAnnVar :: Int}
+data ParsingState = ParsingState {currentAnnVar :: Int, annVarMap :: Map Int Int}
 
-type Parser = Parsec String CurrentAutoAnnVar
+type Parser = Parsec String ParsingState
 
-newAutoAnnVar :: CurrentAutoAnnVar
-newAutoAnnVar = CurrentAutoAnnVar {currentAutoAnnVar = 0}
+newAutoAnnVar :: ParsingState
+newAutoAnnVar = ParsingState {currentAnnVar = 0, annVarMap = Map.empty}
 
-updateAutoAnnVar :: (Int -> Int) -> CurrentAutoAnnVar -> CurrentAutoAnnVar
-updateAutoAnnVar f c = CurrentAutoAnnVar { currentAutoAnnVar = f . currentAutoAnnVar $ c}
+updateAutoAnnVar :: (Int -> Int) -> ParsingState -> ParsingState
+updateAutoAnnVar f c = c { currentAnnVar = f . currentAnnVar $ c}
+
+insertAnnVarMap :: Int -> Int -> ParsingState -> ParsingState
+insertAnnVarMap k v c = c {annVarMap = Map.insert k v (annVarMap c)}
+
+lookupAnnVarMap :: Int -> ParsingState -> Maybe Int
+lookupAnnVarMap k c = Map.lookup k (annVarMap c)
 
 pWhitespace :: Parser ()
 pWhitespace = skipMany (void space <|> lineComment <|> blockComment)
@@ -158,17 +165,29 @@ pLabel
   = (H <$ char 'ᴴ' <?> "ᴴ")
   <|> (L <$ char 'ᴸ' <?> "ᴸ")
   <|> char '^' *> pSuperscript
-  <|> do
-        lastVar' <- getState
-        let v = currentAutoAnnVar lastVar'
-        modifyState $ updateAutoAnnVar (+1)
-        return (LabelVar (AnnotationVar (v + 1)))
+  <|> pDefaultLabel
   where
     pSuperscript
       = L <$ string "L" <|> H <$ string "H" <|> LabelVar <$> pAnnotationVar
 
+pDefaultLabel :: Parser Label
+pDefaultLabel = do
+  state <- getState
+  let v = currentAnnVar state
+  modifyState $ updateAutoAnnVar (+1)
+  return (LabelVar (AnnotationVar v))
+
 pAnnotationVar :: Parser AnnotationVar
-pAnnotationVar = AnnotationVar <$ char 'b' <*> pSubscriptNumber
+pAnnotationVar = do
+  _ <- char 'b'
+  k <- pSubscriptNumber
+  state <- getState
+  case lookupAnnVarMap k state of
+    Just v -> return $ AnnotationVar v
+    Nothing -> do
+      let v = currentAnnVar state
+      modifyState $ insertAnnVarMap k v . updateAutoAnnVar (+1)
+      return $ AnnotationVar v
 
 pTypeAtom :: Parser Type
 pTypeAtom

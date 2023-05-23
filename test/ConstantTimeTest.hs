@@ -29,6 +29,8 @@ testSimple = testCase "Basic and If-Else" $ do
   assertCTCType "fun f x -> if x < 1 then 0 :: Nat^H else 1 + f (x - 1)" $ tfun (tnat L) (tnat H) L
   assertCTCType "let div3 = fn x -> x / 3 in div3" $ tfun (tnat L) (tnat L) L
   assertCTCType "let add = (fn x -> x + 1) :: (Nat^L -> Nat^L)^H in add" $ tfun (tnat L) (tnat L) H
+  assertCTCType "(fn x -> fn y -> (x, y) :: a0^H) :: (Nat^b0 -> (Nat -> (Nat, Nat)^b0))"
+    $ tfuns [tnat H, tnat L, tpair (tnat H) (tnat L) H] L
 
   assertCTViolation "(3 :: Nat^H) / 1"
   assertCTViolation "if (true :: Bool^H) then 1 else 3"
