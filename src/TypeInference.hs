@@ -88,7 +88,12 @@ infixr 9 .+
                         typeMapUnion = unionSub substituteType typeMap
 
 
-data InferenceContext = InferenceContext { currentTypeVar :: Int, currentAnnVar :: Int, currentExpr :: Expr }
+data InferenceContext = InferenceContext {
+                          currentTypeVar :: Int,
+                          currentAnnVar :: Int,
+                          currentExpr :: Expr,
+                          expandEnabled :: Bool -- crude fix for variable type expansion problem in array write
+                        }
 
 type InferenceState = ExceptT String (State InferenceContext)
 
@@ -99,7 +104,17 @@ evalInference :: InferenceState a -> InferenceContext -> Either String a
 evalInference is ctx = fst (runInference is ctx)
 
 newContext :: InferenceContext
-newContext = InferenceContext {currentTypeVar = 0, currentAnnVar = 0, currentExpr = Nat 0} -- Nat 0 is just dummy expression
+newContext = InferenceContext {
+                currentTypeVar = 0,
+                currentAnnVar = 0,
+                currentExpr = Nat 0, -- Nat 0 is just dummy expression
+                expandEnabled = True
+              }
+
+setExpansion :: Bool -> InferenceState ()
+setExpansion b = do
+                  ctx <- get
+                  put $ ctx {expandEnabled = b}
 
 ctcError :: String -> InferenceState a
 ctcError msg = do
@@ -267,12 +282,17 @@ addConstraintLbl c _             _             = return c
 
 type VariantTypeFunc = LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
 
+
+
 -- expandType t1 returns a t2 and constraint such that t1 <= t2 (covariant)
 expandType :: LabelledType -> Constraints -> InferenceState (LabelledType, Substitution, Constraints)
 expandType t c = do
-                   (t', c') <- expandTypeR t c
-                   s <- unifyWithoutLbl t t'
-                   return (substitute s t', s, substituteConstrs s c')
+                   enabled <- gets expandEnabled
+                   if enabled then do
+                      (t', c') <- expandTypeR t c
+                      s <- unifyWithoutLbl t t'
+                      return (substitute s t', s, substituteConstrs s c')
+                   else return (t, emptySubs, c)
 
 expandTypeR :: LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
 expandTypeR (LabelledType t1 (LabelVar b1)) c = do
@@ -289,9 +309,12 @@ expandTypeR (LabelledType t l) c = do
 -- narrowType t1 returns a t2 and constraint such that t2 <= t1 (contravariant)
 narrowType :: LabelledType -> Constraints -> InferenceState (LabelledType, Substitution, Constraints)
 narrowType t c = do
-                   (t', c') <- narrowTypeR t c
-                   s <- unifyWithoutLbl t t'
-                   return (substitute s t', s, substituteConstrs s c')
+                   enabled <- gets expandEnabled
+                   if enabled then do
+                      (t', c') <- narrowTypeR t c
+                      s <- unifyWithoutLbl t t'
+                      return (substitute s t', s, substituteConstrs s c')
+                   else return (t, emptySubs, c)
 
 narrowTypeR :: LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
 narrowTypeR (LabelledType t1 (LabelVar b1)) c = do
@@ -354,7 +377,7 @@ constraintByLabel c H = do
                           e <- getCurrentExpr
                           return (LabelVar b, Set.insert (HighConf e b) c)
 
-constraintByLabel c (LabelVar (AnnotationVar i)) = return (LabelVar (AnnotationVar (-i-1)), c) -- TODO: neg here or in parser?
+constraintByLabel c (LabelVar (AnnotationVar i)) = return (LabelVar (AnnotationVar (-i-1)), c)
 
 relabelTypeT :: Type -> InferenceState (Type, Constraints)
 relabelTypeT (TFun x y) = do
@@ -372,7 +395,7 @@ relabelTypeT (TArray t) = do
                             (t', c) <- relabelType t
                             return (TArray t', c)
 
-relabelTypeT (TVar (TypeVar i)) = return (TVar (TypeVar (-i - 1)), emptyConstraints) -- TODO: neg here or in parser?
+relabelTypeT (TVar (TypeVar i)) = return (TVar (TypeVar (-i - 1)), emptyConstraints)
 
 relabelTypeT t = return (t, emptyConstraints)
 
@@ -555,7 +578,10 @@ runW env (ArrayRead arr idx) = do
 
 
 runW env (ArrayWrite arr idx el) = do
+                                      setExpansion False -- crude fix for variable type expansion problem
                                       (tarr, s1, c1) <- wAlg env arr
+                                      setExpansion True
+
                                       te <- fresh
                                       tarray <- arrType te
                                       s2 <- unify tarr tarray

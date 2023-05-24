@@ -70,11 +70,13 @@ testArray = testCase "Array expressions" $ do
   assertCTCType "let xs = (array 10 0 :: a0^H) in (xs, xs[0])" $ tpair (tarray (tnat L) H) (tnat H) L
   assertCTCType "let xs = array 0 (1 :: Nat^H) in (xs, xs[0])" $ tpair (tarray (tnat H) L) (tnat H) L
   assertCTCType "let xs = (array 10 0 :: a0^H) in xs[0] = xs[1]" $ tnat H
+  assertCTCType "let xs = (array 10 0 :: a0^H) in xs[0] = 1" $ tnat L
 
   assertCTViolation "(array 0 (1 :: Nat^H)) :: (Array Nat^L)^L"
   assertCTViolation "let len = 1 :: Nat^H in array len 0"
   assertCTViolation "let xs = (array 10 0 :: a0^H) in xs[0] / 3"
   assertCTViolation "(array 10 0 :: (Array Nat^L)^L)[0] = (1 :: Nat^H)"
+  assertCTViolation "let xs = (array 10 0 :: (Array Nat^L)^L) in xs[0] = (1 :: Nat^H)"
 
 assertCTCType :: String -> LabelledType -> Assertion
 assertCTCType src ty = assertType src (assertRight "Type check failed" src $ parseAndAnalyse src) (Type ty)

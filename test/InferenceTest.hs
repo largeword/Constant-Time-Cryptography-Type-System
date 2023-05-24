@@ -66,10 +66,11 @@ testOp = testCase "Operator expressions" $ do
   assertSrcType "let xs = 1 == 2 in let xt = 3 == 4 in xs || xt" TBool
   assertSrcType "let xs = 1 < 2 in let xt = 3 < 4 in xs && xt" TBool
   assertSrcType "let xs = 1 / 2 in xs" TNat
-  -- TODO: error cases
 
   assertTypeMismatch "1 == true"
   assertTypeMismatch "1 != false"
+  assertTypeMismatch "1 + false"
+  assertTypeMismatch "true && 1"
 
 -- test pair & case pair
 testPairCase :: TestTree
@@ -112,7 +113,10 @@ testLists = testCase "Lists expressions" $ do
   assertSrcType "let xs = 1 : 2 : [] in xs" (tlist TNat)
   assertSrcType "let xs = true : false : true : [] in xs" (tlist TBool)
   assertSrcType "let xs = 1 : 2 : 3 : [] in case xs of [] -> 0 , y : ys -> y" TNat
-  -- TODO: error cases
+
+  assertTypeMismatch "1 : true : []"
+  assertTypeMismatch "let xs = 1 : 2 : 3 : [] in case xs of [] -> true , y : ys -> y"
+  assertTypeMismatch "let xs = 1 : 2 : 3 : [] in case xs of [] -> true , y : ys -> y && false"
 
 -- Type Inference Helper Functions
 
