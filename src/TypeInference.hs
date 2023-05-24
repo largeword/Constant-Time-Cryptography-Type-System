@@ -91,8 +91,7 @@ infixr 9 .+
 data InferenceContext = InferenceContext {
                           currentTypeVar :: Int,
                           currentAnnVar :: Int,
-                          currentExpr :: Expr,
-                          expandEnabled :: Bool -- crude fix for variable type expansion problem in array write
+                          currentExpr :: Expr
                         }
 
 type InferenceState = ExceptT String (State InferenceContext)
@@ -107,14 +106,8 @@ newContext :: InferenceContext
 newContext = InferenceContext {
                 currentTypeVar = 0,
                 currentAnnVar = 0,
-                currentExpr = Nat 0, -- Nat 0 is just dummy expression
-                expandEnabled = True
+                currentExpr = Nat 0 -- Nat 0 is just dummy expression
               }
-
-setExpansion :: Bool -> InferenceState ()
-setExpansion b = do
-                  ctx <- get
-                  put $ ctx {expandEnabled = b}
 
 ctcError :: String -> InferenceState a
 ctcError msg = do
@@ -287,12 +280,9 @@ type VariantTypeFunc = LabelledType -> Constraints -> InferenceState (LabelledTy
 -- expandType t1 returns a t2 and constraint such that t1 <= t2 (covariant)
 expandType :: LabelledType -> Constraints -> InferenceState (LabelledType, Substitution, Constraints)
 expandType t c = do
-                   enabled <- gets expandEnabled
-                   if enabled then do
-                      (t', c') <- expandTypeR t c
-                      s <- unifyWithoutLbl t t'
-                      return (substitute s t', s, substituteConstrs s c')
-                   else return (t, emptySubs, c)
+                    (t', c') <- expandTypeR t c
+                    s <- unifyWithoutLbl t t'
+                    return (substitute s t', s, substituteConstrs s c')
 
 expandTypeR :: LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
 expandTypeR (LabelledType t1 (LabelVar b1)) c = do
@@ -309,12 +299,9 @@ expandTypeR (LabelledType t l) c = do
 -- narrowType t1 returns a t2 and constraint such that t2 <= t1 (contravariant)
 narrowType :: LabelledType -> Constraints -> InferenceState (LabelledType, Substitution, Constraints)
 narrowType t c = do
-                   enabled <- gets expandEnabled
-                   if enabled then do
-                      (t', c') <- narrowTypeR t c
-                      s <- unifyWithoutLbl t t'
-                      return (substitute s t', s, substituteConstrs s c')
-                   else return (t, emptySubs, c)
+                    (t', c') <- narrowTypeR t c
+                    s <- unifyWithoutLbl t t'
+                    return (substitute s t', s, substituteConstrs s c')
 
 narrowTypeR :: LabelledType -> Constraints -> InferenceState (LabelledType, Constraints)
 narrowTypeR (LabelledType t1 (LabelVar b1)) c = do
@@ -352,9 +339,7 @@ variantTypeT covar contra (TPair t1 t2) c = do
                                               (t2', c2) <- covar t2 c1
                                               return (TPair t1' t2', c2)
 
-variantTypeT covar contra (TArray t) c = do
-                                          (t', c') <- covar t c
-                                          return (TArray t', c')
+variantTypeT covar contra (TArray t) c = return (TArray t, c) -- invariant
 
 variantTypeT covar contra (TList t) c = do
                                           (t', c') <- covar t c
@@ -578,10 +563,7 @@ runW env (ArrayRead arr idx) = do
 
 
 runW env (ArrayWrite arr idx el) = do
-                                      setExpansion False -- crude fix for variable type expansion problem
                                       (tarr, s1, c1) <- wAlg env arr
-                                      setExpansion True
-
                                       te <- fresh
                                       tarray <- arrType te
                                       s2 <- unify tarr tarray
